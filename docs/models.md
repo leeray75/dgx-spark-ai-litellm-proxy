@@ -1,5 +1,7 @@
 # Model Comparison Guide
 
+This guide compares the two supported LLMs for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
+
 ## Model Overview
 
 ### Qwen3-Coder-Next-FP8

@@ -2,7 +2,11 @@
 
 ## System Overview
 
-This project implements an OpenAI-compatible LLM inference infrastructure with Langfuse v3 observability.
+This project implements an OpenAI-compatible LLM inference infrastructure with Langfuse v3 observability,
+specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
+
+> **Hardware:** NVIDIA DGX Spark workstation with GB10 Superchip (128 GB unified memory)
+> based on NVIDIA Blackwell architecture, optimized for large language model inference.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐

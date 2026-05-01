@@ -1,6 +1,8 @@
 # AI LLM Proxy - Qwen3-Coder-Next-FP8 & Nemotron-3-Super-120B
 
-An OpenAI-compatible LLM proxy running on NVIDIA DGX Spark with Langfuse v3 observability.
+An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** with Langfuse v3 observability.
+
+> **Hardware:** NVIDIA DGX Spark workstation with GB10 Superchip (128 GB unified memory) and NVIDIA Blackwell architecture GPUs.
 
 ## Features
 

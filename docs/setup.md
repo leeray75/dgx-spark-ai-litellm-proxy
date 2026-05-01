@@ -1,5 +1,7 @@
 # Setup Guide
 
+This guide covers installation of the **AI LLM Proxy** stack on an **NVIDIA DGX Spark (Blackwell GB10)** workstation.
+
 ## Prerequisites
 
 ### Hardware Requirements
@@ -7,9 +9,11 @@
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
 | RAM | 64 GB | 128 GB |
-| GPU | 1x NVIDIA RTX 4090 (24GB) | 1x GB10 (128GB unified) |
+| GPU | 1x NVIDIA RTX 4090 (24GB) | 1x GB10 (128GB unified) - NVIDIA DGX Spark |
 | Storage | 500 GB SSD | 1 TB NVMe SSD |
 | CPU | 16 cores | 32+ cores |
+
+> **Note:** This project is specifically optimized for the NVIDIA DGX Spark Blackwell GB10 workstation with 128 GB unified memory.
 
 ### Software Requirements
 

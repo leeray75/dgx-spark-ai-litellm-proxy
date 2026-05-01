@@ -1,7 +1,10 @@
 # =============================================================================
-# docker-compose.nemotron.yml — NVIDIA Nemotron-3-Super-120B-A12B-NVFP4
+# docker-compose.nemotron.yml — NVIDIA DGX Spark Blackwell GB10
 #
 # Model:  nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+# Hardware: NVIDIA DGX Spark workstation with GB10 Superchip (128 GB unified memory)
+#           Based on NVIDIA Blackwell architecture
+#
 #         (120B total, 12B active, NVFP4 quantization, 128K context)
 #
 # Architecture notes:

@@ -1,7 +1,10 @@
 # =============================================================================
-# docker-compose.yml — Qwen3-Coder-Next-FP8 on NVIDIA DGX Spark
+# docker-compose.yml — Qwen3-Coder-Next-FP8 on NVIDIA DGX Spark (Blackwell GB10)
 #
-# Image:  vllm/vllm-openai:v0.19.1-cu130  (ARM64, cu130, proven on GB10)
+# Hardware: NVIDIA DGX Spark workstation with GB10 Superchip (128 GB unified memory)
+#           Based on NVIDIA Blackwell architecture
+#
+# Image:    vllm/vllm-openai:v0.19.1-cu130  (ARM64, cu130, proven on GB10)
 # Model:  Qwen/Qwen3-Coder-Next-FP8       (80B total / 3B active, hybrid GDN+MoE, FP8 quant)
 #
 # Architecture notes:
