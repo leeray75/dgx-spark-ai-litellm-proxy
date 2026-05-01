@@ -1,0 +1,371 @@
+# =============================================================================
+# docker-compose.nemotron.yml — NVIDIA Nemotron-3-Super-120B-A12B-NVFP4
+#
+# Model:  nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+#         (120B total, 12B active, NVFP4 quantization, 128K context)
+#
+# Architecture notes:
+#   - MoE architecture with 512 experts, 12 active per forward pass
+#   - Uses NVFP4 quantization for improved memory efficiency on Blackwell
+#   - Requires reasoning parser plugin for proper response extraction
+#   - Uses marlin backend for NVFP4 GEMM operations
+#   - mamba-ssm-cache-dtype float32 required for stability
+#
+# This compose file enables Langfuse v3 observability with:
+#   - ClickHouse: OLAP store for traces/observations/scores
+#   - MinIO:      S3-compatible blob storage for trace payloads
+#   - Redis:      Event queue for async processing
+#   - PostgreSQL: Shared instance (Langfuse + LiteLLM separate schemas)
+#
+# External ports:
+#   3000  — Langfuse UI + API
+#   4000  — LiteLLM Proxy (OpenAI-compatible) + UI at /ui
+#   8200  — vLLM engine (Nemotron)
+#   9090  — MinIO S3 API
+#   9091  — MinIO console UI
+#
+# Internal-only ports (127.0.0.1):
+#   5432  — PostgreSQL
+#   8123  — ClickHouse HTTP
+#   9000  — ClickHouse native protocol
+#   6379  — Redis
+#   3030  — Langfuse worker
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — shared instance with two isolated databases
+  #   "postgres" → Langfuse, "litellm" → LiteLLM
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: langfuse-postgres
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # ClickHouse — OLAP store for Langfuse traces
+  # ---------------------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: langfuse-clickhouse
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - langfuse-clickhouse-data:/var/lib/clickhouse
+      - langfuse-clickhouse-logs:/var/log/clickhouse-server
+      - ./clickhouse-config.xml:/etc/clickhouse-server/config.d/langfuse.xml:ro
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-default}
+    healthcheck:
+      test: ["CMD", "clickhouse-client",
+             "--user", "${CLICKHOUSE_USER:-clickhouse}",
+             "--password", "${CLICKHOUSE_PASSWORD}",
+             "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis — Langfuse event queue
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: langfuse-redis
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: >
+      --requirepass ${REDIS_AUTH}
+      --maxmemory-policy noeviction
+    volumes:
+      - langfuse-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_AUTH}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-compatible blob storage
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio
+    container_name: langfuse-minio
+    networks:
+      - ai-bridge
+    ports:
+      - "9090:9000"
+      - "9091:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    volumes:
+      - langfuse-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MinIO Init — creates the "langfuse" bucket
+  # ---------------------------------------------------------------------------
+  minio-init:
+    image: minio/mc
+    container_name: langfuse-minio-init
+    networks:
+      - ai-bridge
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minio} ${MINIO_ROOT_PASSWORD};
+        mc mb --ignore-existing local/langfuse;
+        echo 'MinIO bucket ready';
+      "
+    restart: on-failure
+
+  # ---------------------------------------------------------------------------
+  # Langfuse Worker — async event processor
+  # ---------------------------------------------------------------------------
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: langfuse-worker
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:3030:3030"
+    depends_on: &langfuse-depends-on
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-postgres}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+
+      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
+
+      CLICKHOUSE_MIGRATION_URL: clickhouse://${CLICKHOUSE_USER:-clickhouse}:${CLICKHOUSE_PASSWORD}@clickhouse:9000/${CLICKHOUSE_DATABASE:-default}
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_EXTERNAL_ENDPOINT: http://localhost:9090
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+      LANGFUSE_S3_BATCH_EXPORT_BUCKET: langfuse
+      LANGFUSE_S3_BATCH_EXPORT_PREFIX: exports/
+      LANGFUSE_S3_BATCH_EXPORT_REGION: us-east-1
+      LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT: http://localhost:9090
+      LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: "true"
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: ${REDIS_AUTH}
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Langfuse Web — UI + public ingestion API
+  # ---------------------------------------------------------------------------
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: langfuse
+    networks:
+      - ai-bridge
+    ports:
+      - "3000:3000"
+    depends_on: *langfuse-depends-on
+    environment:
+      <<: *langfuse-env
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # vLLM Engine — Nemotron-3-Super-120B-A12B-NVFP4
+  # Stable version optimized for Blackwell/NVFP4 on DGX Spark
+  # ---------------------------------------------------------------------------
+  nemotron-engine:
+    image: vllm/vllm-openai:v0.18.1-cu130
+    container_name: nemotron-engine
+    networks:
+      - ai-bridge
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 120
+      start_period: 600s
+    ipc: host
+    ports:
+      - "8200:8000"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ./scripts/super_v3_reasoning_parser.py:/app/super_v3_reasoning_parser.py:ro
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - VLLM_NVFP4_GEMM_BACKEND=marlin
+      - VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+      - VLLM_FLASHINFER_ALLREDUCE_BACKEND=trtllm
+      - VLLM_USE_FLASHINFER_MOE_FP4=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    command: >
+      --model nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+      --served-model-name nemotron-super
+      --host 0.0.0.0
+      --port 8000
+      --async-scheduling
+      --dtype auto
+      --kv-cache-dtype fp8
+      --tensor-parallel-size 1
+      --pipeline-parallel-size 1
+      --data-parallel-size 1
+      --trust-remote-code
+      --gpu-memory-utilization 0.85
+      --enable-chunked-prefill
+      --max-num-seqs 4
+      --max-model-len 262144
+      --moe-backend marlin
+      --mamba_ssm_cache_dtype float32
+      --quantization fp4
+      --reasoning-parser-plugin /app/super_v3_reasoning_parser.py
+      --reasoning-parser super_v3
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+
+  # ---------------------------------------------------------------------------
+  # LiteLLM Proxy — unified OpenAI-compatible API + Langfuse OTEL tracing
+  # ---------------------------------------------------------------------------
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm-proxy
+    networks:
+      - ai-bridge
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_DROP_PARAMS: ${LITELLM_DROP_PARAMS:-true}
+      LITELLM_MODIFY_PARAMS: ${LITELLM_MODIFY_PARAMS:-true}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_OTEL_HOST: http://langfuse:3000
+      LANGFUSE_HOST: ${LANGFUSE_HOST}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nemotron-engine:
+        condition: service_healthy
+      langfuse-web:
+        condition: service_started
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--drop_params"]
+    restart: always
+
+  # ---------------------------------------------------------------------------
+  # Qdrant — Vector database for Nemotron (optional, for RAG)
+  # ---------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant
+    networks:
+      - ai-bridge
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    restart: unless-stopped
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  ai-bridge:
+    driver: bridge
+
+# =============================================================================
+# Named volumes
+# =============================================================================
+volumes:
+  langfuse-postgres-data:
+  langfuse-clickhouse-data:
+  langfuse-clickhouse-logs:
+  langfuse-minio-data:
+  langfuse-redis-data:
+  qdrant-storage:

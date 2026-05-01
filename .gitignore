@@ -1,0 +1,41 @@
+# =============================================================================
+# .gitignore — AI LLM Proxy Project
+# =============================================================================
+
+# Environment variables (contains secrets!)
+.env
+*.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+docker-logs.txt
+qwen3-coder-next-engine.logs
+logs/
+
+# Data directories (volumes)
+langfuse-postgres-data/
+langfuse-clickhouse-data/
+langfuse-clickhouse-logs/
+langfuse-minio-data/
+langfuse-redis-data/
+qdrant-storage/
+.cache/
+
+# HuggingFace cache
+.huggingface/
+.huggingface/*
+~/.cache/huggingface/
+
+# Generated files
+.env.backup
+*.bak

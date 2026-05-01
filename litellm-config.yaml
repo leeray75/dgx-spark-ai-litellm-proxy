@@ -1,0 +1,54 @@
+# =============================================================================
+# litellm-config.yaml — LiteLLM Configuration
+# =============================================================================
+# Model: Qwen3-Coder-Next-FP8 (primary)
+# Model: Nemotron-3-Super-120B (via docker-compose.nemotron.yml)
+#
+# This configuration enables:
+#   - OpenAI-compatible API endpoints
+#   - Langfuse OTEL tracing
+#   - Automatic token counting
+#   - Rate limiting and budget tracking
+# =============================================================================
+
+model_list:
+  # Qwen3-Coder-Next-FP8 (primary model)
+  - model_name: qwen3-coder-next
+    litellm_params:
+      model: openai/qwen3-coder-next
+      api_base: http://qwen3-coder-next-engine:8000/v1
+      api_key: "none"
+      supports_response_api: false
+    model_info:
+      input_cost_per_token: 0.0000002
+      output_cost_per_token: 0.0000006
+      description: Qwen3-Coder-Next-FP8 (80B total, 3B active, FP8 quant)
+
+  # Nemotron-3-Super-120B-A12B-NVFP4 (via separate compose file)
+  - model_name: nemotron-super
+    litellm_params:
+      model: openai/nemotron-super
+      api_base: http://nemotron-engine:8000/v1
+      api_key: "none"
+      supports_response_api: false
+    model_info:
+      input_cost_per_token: 0.0000005
+      output_cost_per_token: 0.0000015
+      description: Nemotron-3-Super-120B-A12B-NVFP4 (NVFP4 quant)
+
+litellm_settings:
+  drop_params: true
+  drop_unsupported_params: true
+  supports_response_api: false
+  suppress_proxy_error_logging: true
+  callbacks: ["langfuse_otel"]
+  num_retries: 3
+  request_timeout: 600
+  turn_off_message_logging: false
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  litellm_salt_key: os.environ/LITELLM_SALT_KEY
+  disable_spend_logs: false
+  database_connection_pool_limit: 10
