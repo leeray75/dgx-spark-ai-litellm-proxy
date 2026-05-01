@@ -78,9 +78,11 @@ An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** 
    docker compose ps
    ```
 
-## Model Switching
+## Scripts
 
-Use the `model-switch.sh` script to switch between models:
+### model-switch.sh
+
+Switch between models:
 
 ```bash
 # Switch to Qwen3-Coder-Next-FP8
@@ -92,6 +94,26 @@ Use the `model-switch.sh` script to switch between models:
 # Check current status
 ./scripts/model-switch.sh status
 ```
+
+### restart.sh
+
+Full stack restart with system cache clearing (for NVIDIA DGX Spark Blackwell GB10):
+
+```bash
+# Restart with Qwen3-Coder-Next-FP8 (default)
+./scripts/restart.sh
+
+# Restart with Nemotron-3-Super-120B
+./scripts/restart.sh nemotron
+
+# Check container status
+./scripts/restart.sh status
+
+# Stop all containers
+./scripts/restart.sh clean
+```
+
+> **Note:** The restart script includes the "Ritual" - clearing system caches via `sudo sync; echo 3 > /proc/sys/vm/drop_caches` - to ensure optimal performance on DGX Spark.
 
 ## Access Points
 
