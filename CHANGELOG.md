@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.1] - 2026-05-02
+
+### Fixed
+
+- AI agent documentation now uses correct native model names (`qwen3-coder-next`, `nemotron-super`) instead of Claude model names
+- Updated `README.md` and `docs/agents.md` to reflect correct model mappings for all AI agents
+
+### Changed
+
+- Documentation consistency: All AI agent configurations now reference native backend models
+
+### Performance
+
+- Qwen3 engine memory utilization increased from 0.88 to 0.92
+- Max sequences increased from 16 to 32
+- Max batched tokens increased from 16384 to 32768
+- Added scheduler-delay-factor (0.3) for improved decode throughput
+- Added Redis exact-match prompt caching for 100% identical requests
+- Added 16GB shared memory and ulimits for vLLM container stability
+- PostgreSQL tuned with shared_buffers=512MB, work_mem=16MB, WAL compression
+- ClickHouse memory capped to 30% of RAM
+- LiteLLM log level reduced to warning
+
+### Configuration
+
+- Updated LiteLLM model token limits to match vLLM `--max-model-len` (262K input, 16K output)
+- Added LiteLLM stream_timeout (300s) for better stalled stream detection
+- Redis cache configuration moved to litellm-config.yaml for explicit configuration
+- Disabled Redis RDB snapshots and AOF for pure queue/cache workload
+
 ## [1.1.0] - 2026-05-02
 
 ### Added
