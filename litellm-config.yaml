@@ -3,20 +3,31 @@
 # =============================================================================
 # vLLM is started with --served-model-name qwen3-coder-next
 # So ALL litellm_params.model references must use: hosted_vllm/qwen3-coder-next
+#
+# Changes vs original:
+#   max_input_tokens:  32768 → 262144 on sonnet/qwen aliases (matches --max-model-len)
+#   max_output_tokens: 8192  → 16384  on sonnet/qwen aliases (conservative was unnecessary)
+#   max_tokens:        32768 → 262144 on sonnet/qwen aliases
+#   claude-haiku-4-5:  kept short (32768 input / 4096 output) — fast-task alias,
+#                      prevents Claude Code routing 200K prompts to the "cheap" slot
+#   stream_timeout:    added 300s — catches stalled streams before request_timeout fires
+#   cache_params:      moved Redis cache config here (was only in compose env vars);
+#                      explicit ttl=3600, scoped to completion call types only
 # =============================================================================
 
 model_list:
 
   # ── Claude Code: main model ────────────────────────────────────────────────
+  # Full context window exposed — Claude Code will use up to 262K for large repos
   - model_name: claude-sonnet-4-5
     litellm_params:
       model: hosted_vllm/qwen3-coder-next        # matches --served-model-name exactly
       api_base: http://qwen3-coder-next-engine:8000/v1
       api_key: "none"
     model_info:
-      max_tokens: 32768
-      max_input_tokens: 32768
-      max_output_tokens: 8192
+      max_tokens: 262144
+      max_input_tokens: 262144                   # matches vLLM --max-model-len
+      max_output_tokens: 16384                   # 8192 was unnecessarily conservative
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: false
@@ -24,6 +35,9 @@ model_list:
       output_cost_per_token: 0.0000006
 
   # ── Claude Code: background/fast tasks ────────────────────────────────────
+  # Intentionally short context — Claude Code routes quick/cheap tasks here.
+  # Keeping max_input_tokens low prevents it from sending huge prompts to the
+  # "fast" alias and accidentally saturating the single backend with long prefills.
   - model_name: claude-haiku-4-5
     litellm_params:
       model: hosted_vllm/qwen3-coder-next        # same backend
@@ -31,8 +45,8 @@ model_list:
       api_key: "none"
     model_info:
       max_tokens: 32768
-      max_input_tokens: 32768
-      max_output_tokens: 8192
+      max_input_tokens: 32768                    # keep short — fast-task alias
+      max_output_tokens: 4096
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: false
@@ -40,15 +54,16 @@ model_list:
       output_cost_per_token: 0.0000006
 
   # ── Other agents: friendly name ────────────────────────────────────────────
+  # Full context window — use this alias when you want the full 262K
   - model_name: qwen3-coder-next
     litellm_params:
       model: hosted_vllm/qwen3-coder-next
       api_base: http://qwen3-coder-next-engine:8000/v1
       api_key: "none"
     model_info:
-      max_tokens: 32768
-      max_input_tokens: 32768
-      max_output_tokens: 8192
+      max_tokens: 262144
+      max_input_tokens: 262144
+      max_output_tokens: 16384
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: false
@@ -76,9 +91,26 @@ litellm_settings:
   drop_unsupported_params: true
   modify_params: true
   request_timeout: 600
+  stream_timeout: 300                            # catches stalled streams before request_timeout fires
   num_retries: 3
   turn_off_message_logging: false
   callbacks: ["langfuse_otel"]
+
+  # Redis exact-match prompt cache
+  # Defined here (not just in compose env vars) so it's explicit and portable.
+  # ttl=3600: cached responses expire after 1 hour — tune down for highly dynamic workloads.
+  # Pairs with the 75-81% vLLM prefix cache hit rate: vLLM handles partial prefix reuse,
+  # LiteLLM handles 100%-identical request short-circuiting before vLLM is even called.
+  cache: true
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+    password: os.environ/REDIS_AUTH
+    ttl: 3600
+    supported_call_types:
+      - acompletion
+      - completion
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

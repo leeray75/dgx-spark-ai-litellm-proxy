@@ -5,7 +5,7 @@
 #           Based on NVIDIA Blackwell architecture
 #
 # Image:    vllm/vllm-openai:v0.19.1-cu130  (ARM64, cu130, proven on GB10)
-# Model:  Qwen/Qwen3-Coder-Next-FP8       (80B total / 3B active, hybrid GDN+MoE, FP8 quant)
+# Model:    Qwen/Qwen3-Coder-Next-FP8       (80B total / 3B active, hybrid GDN+MoE, FP8 quant)
 #
 # Architecture notes:
 #   - Hybrid: Gated DeltaNet (linear attention) + Gated Attention + MoE (512 experts, 10 active)
@@ -13,6 +13,18 @@
 #   - mamba-ssm-cache-dtype float32 required for GDN/SSM layer stability
 #   - max-cudagraph-capture-size reduced from 512→128 to prevent GDN Mamba OOM on capture
 #   - tool-call-parser: qwen3_coder (native, no external plugin unlike Nemotron-Super)
+#
+# Performance tuning (vs original):
+#   - gpu-memory-utilization:    0.88 → 0.92   (GB10 unified memory is stable higher)
+#   - max-num-seqs:              16   → 32      (KV cache was only ~2% utilized, huge headroom)
+#   - max-num-batched-tokens:    16384 → 32768  (matches increased seq capacity)
+#   - scheduler-delay-factor:    (added) 0.3   (batches decode steps → higher gen throughput)
+#   - uvicorn-log-level:         (added) warning (reduces log noise)
+#   - LiteLLM Redis cache:       (added)        (serves exact-match prompts without hitting vLLM)
+#   - Redis RDB/AOF:             disabled       (pure queue workload; no persistence needed)
+#   - PostgreSQL:                tuned shared_buffers, work_mem, WAL compression
+#   - ClickHouse:                memory cap added (prevents greedy RAM usage)
+#   - vLLM shm_size + ulimits:   added          (prevents IPC issues under concurrent load)
 #
 # Observability: Langfuse v3 (two containers: web + worker)
 #   - ClickHouse: single-node OLAP for traces/observations/scores
@@ -44,6 +56,7 @@ services:
   # PostgreSQL — shared instance; two isolated databases:
   #   "postgres" for Langfuse, "litellm" for LiteLLM
   # TZ=UTC / PGTZ=UTC required — non-UTC causes incorrect Langfuse query results
+  # Tuned: shared_buffers, work_mem, WAL compression, checkpoint settings
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
@@ -58,6 +71,14 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-postgres}             # Langfuse DB (default)
       TZ: UTC                                            # required by Langfuse v3
       PGTZ: UTC
+    command: >
+      postgres
+      -c shared_buffers=512MB
+      -c effective_cache_size=1GB
+      -c work_mem=16MB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_compression=on
     volumes:
       - langfuse-postgres-data:/var/lib/postgresql/data
       # Creates the "litellm" database on first start so LiteLLM has its own schema
@@ -72,6 +93,7 @@ services:
   # ---------------------------------------------------------------------------
   # ClickHouse — OLAP store for Langfuse traces, observations, and scores
   # Single-node with built-in Keeper (no external ZooKeeper needed)
+  # Memory capped to prevent greedy RAM usage alongside vLLM
   # ---------------------------------------------------------------------------
   clickhouse:
     image: clickhouse/clickhouse-server:latest
@@ -89,6 +111,7 @@ services:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}       # set in .env
       CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-default}
+      CLICKHOUSE_MAX_SERVER_MEMORY_USAGE_TO_RAM_RATIO: "0.3"   # cap CH memory; prevents competing with vLLM
     healthcheck:
       test: ["CMD", "clickhouse-client",
              "--user", "${CLICKHOUSE_USER:-clickhouse}",
@@ -101,7 +124,9 @@ services:
 
   # ---------------------------------------------------------------------------
   # Redis — Langfuse event queue + API-key / prompt cache
+  #         LiteLLM exact-match prompt cache (new)
   # maxmemory-policy noeviction is REQUIRED — prevents queue job eviction
+  # RDB snapshots and AOF disabled — pure queue/cache workload, no persistence needed
   # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
@@ -113,6 +138,8 @@ services:
     command: >
       --requirepass ${REDIS_AUTH}
       --maxmemory-policy noeviction
+      --save ""
+      --appendonly no
     volumes:
       - langfuse-redis-data:/data
     healthcheck:
@@ -265,6 +292,15 @@ services:
   # ---------------------------------------------------------------------------
   # vLLM Engine — Qwen3-Coder-Next-FP8
   # ARM64 / GB10 Superchip, 128 GB unified memory
+  #
+  # Performance changes vs original:
+  #   gpu-memory-utilization 0.88→0.92   GB10 unified memory stable higher
+  #   max-num-seqs          16→32        KV cache was only ~2% used; huge headroom
+  #   max-num-batched-tokens 16384→32768 matches the increased seq capacity
+  #   scheduler-delay-factor 0.3         batches more decode steps → higher gen t/s
+  #   uvicorn-log-level warning          cuts log noise, marginal CPU savings
+  #   shm_size 16gb                      prevents IPC issues under concurrent load
+  #   ulimits memlock/stack              standard for GPU inference workloads
   # ---------------------------------------------------------------------------
   qwen3-coder-next-engine:
     image: vllm/vllm-openai:v0.19.1-cu130
@@ -288,6 +324,14 @@ services:
               count: all
               capabilities: [gpu]
     ipc: host
+    shm_size: '16gb'
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      stack:
+        soft: 67108864
+        hard: 67108864
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
@@ -295,7 +339,7 @@ services:
       retries: 120
       start_period: 600s
     command: >
-      --model Qwen/Qwen3-Coder-Next-FP8
+      Qwen/Qwen3-Coder-Next-FP8
       --served-model-name qwen3-coder-next
       --host 0.0.0.0
       --port 8000
@@ -303,13 +347,14 @@ services:
       --quantization fp8
       --kv-cache-dtype fp8
       --tensor-parallel-size 1
-      --gpu-memory-utilization 0.88
+      --gpu-memory-utilization 0.92
       --max-model-len 262144
-      --max-num-seqs 16
+      --max-num-seqs 32
       --enable-chunked-prefill
-      --max-num-batched-tokens 16384
+      --max-num-batched-tokens 32768
       --mamba-ssm-cache-dtype float32
       --max-cudagraph-capture-size 128
+      --uvicorn-log-level warning
       --trust-remote-code
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
@@ -328,6 +373,10 @@ services:
   #
   # Without DATABASE_URL, master_key still authenticates requests but all of
   # the above features are unavailable and nothing persists across restarts.
+  #
+  # Redis cache (new): serves exact-match repeated prompts without hitting vLLM.
+  # Pairs well with the 75-81% prefix cache hit rate seen in vLLM logs — prompts
+  # that are 100% identical are short-circuited before they even reach the engine.
   # ---------------------------------------------------------------------------
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
@@ -352,6 +401,12 @@ services:
       # Container-to-container: use service name, not Tailscale hostname
       LANGFUSE_OTEL_HOST: http://langfuse:3000
       LANGFUSE_HOST: ${LANGFUSE_HOST}                   # External URL — set in .env
+      # Redis exact-match prompt cache — short-circuits vLLM for identical requests
+      LITELLM_CACHE: "true"
+      LITELLM_CACHE_TYPE: "redis"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_AUTH}
     depends_on:
       postgres:
         condition: service_healthy
@@ -359,6 +414,8 @@ services:
         condition: service_healthy
       langfuse-web:
         condition: service_started
+      redis:
+        condition: service_healthy
     command: ["--config", "/app/config.yaml", "--port", "4000", "--drop_params"]
     restart: always
 
