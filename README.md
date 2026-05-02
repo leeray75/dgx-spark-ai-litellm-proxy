@@ -152,6 +152,29 @@ curl http://localhost:4000/v1/chat/completions \
   }'
 ```
 
+### Claude Code
+
+Configure Claude Code on your host machine to use the LiteLLM proxy:
+
+**`.claude.json` or Claude Code settings:**
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://spark-8013.taileaa4a8.ts.net:4000",
+    "ANTHROPIC_AUTH_TOKEN": "sk-your-litellm-master-key",
+    "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-5"
+  }
+}
+```
+
+**Available Claude Code model names:**
+| Model Name | Purpose | Backend Model |
+|------------|---------|---------------|
+| `claude-sonnet-4-5` | Main tasks, complex reasoning | Qwen3-Coder-Next-FP8 |
+| `claude-haiku-4-5` | Fast/background tasks | Qwen3-Coder-Next-FP8 |
+
+> **Note:** The proxy forwards Claude API requests to your local vLLM engine. Set `ANTHROPIC_BASE_URL` to your local LiteLLM endpoint (default: `http://localhost:4000`).
+
 ## Stopping Services
 
 ```bash

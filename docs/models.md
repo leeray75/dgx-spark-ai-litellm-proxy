@@ -149,6 +149,48 @@ nemotron-engine:
 
 ---
 
+## Claude Code Models
+
+The LiteLLM proxy supports Claude Code API compatibility through virtual model names.
+
+### claude-sonnet-4-5
+
+| Attribute | Value |
+|-----------|-------|
+| **Model Name** | claude-sonnet-4-5 |
+| **Purpose** | Main tasks, complex reasoning |
+| **Backend** | Qwen3-Coder-Next-FP8 (vLLM port 8300) |
+| **Max Tokens** | 32,768 input / 8,192 output |
+| **Tool Calling** | Supported |
+| **Function Calling** | Supported |
+
+**Use Cases:**
+- Complex multi-step reasoning tasks
+- Code generation and analysis
+- Technical documentation
+- General assistant with coding focus
+
+---
+
+### claude-haiku-4-5
+
+| Attribute | Value |
+|-----------|-------|
+| **Model Name** | claude-haiku-4-5 |
+| **Purpose** | Fast/background tasks |
+| **Backend** | Qwen3-Coder-Next-FP8 (vLLM port 8300) |
+| **Max Tokens** | 32,768 input / 8,192 output |
+| **Tool Calling** | Supported |
+| **Function Calling** | Supported |
+
+**Use Cases:**
+- Fast background processing
+- Simple tasks and queries
+- Automated workflows
+- Quick responses
+
+---
+
 ## Testing Models
 
 ### Test Qwen3-Coder-Next-FP8
