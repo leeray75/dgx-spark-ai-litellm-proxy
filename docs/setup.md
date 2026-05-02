@@ -169,6 +169,28 @@ curl http://localhost:4000/v1/chat/completions \
   }'
 ```
 
+### Test Claude Code Models
+
+```bash
+# claude-sonnet-4-5 (main tasks)
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -d '{
+    "model": "claude-sonnet-4-5",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "temperature": 0.7
+  }'
+
+# claude-haiku-4-5 (fast tasks)
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -d '{
+    "model": "claude-haiku-4-5",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "temperature": 0.7
+  }'
+```
+
 ## Model Switching
 
 To switch between models after installation:

@@ -152,6 +152,61 @@ curl http://localhost:4000/v1/chat/completions \
   }'
 ```
 
+### Claude Code
+
+Configure Claude Code to use the LiteLLM proxy for local LLM access.
+
+#### Setting Up Claude Code
+
+**Location of Claude Code Settings:**
+
+| Platform | File Location |
+|----------|---------------|
+| **Windows** | `C:\Users\<username>\.claude\settings.json` |
+| **macOS/Linux** | `~/.claude/settings.json` |
+
+**Steps to configure:**
+
+1. Open your Claude Code settings file (`settings.json`)
+2. Add the following configuration:
+
+```json
+{
+  "defaultShell": "bash",
+  "env": {
+    "BASH_ENV": "/home/leeray/.bashrc",
+    "ANTHROPIC_BASE_URL": "http://localhost:4000",
+    "ANTHROPIC_AUTH_TOKEN": "sk-your-litellm-master-key",
+    "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-5",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"
+  }
+}
+```
+
+3. Save the file and restart Claude Code
+
+**Environment Variable Reference:**
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `defaultShell` | Shell to use | `"bash"` |
+| `BASH_ENV` | Bash environment file | `"/home/leeray/.bashrc"` |
+| `ANTHROPIC_BASE_URL` | LiteLLM proxy endpoint | `"http://localhost:4000"` |
+| `ANTHROPIC_AUTH_TOKEN` | Your LiteLLM master key | `"sk-..."` |
+| `ANTHROPIC_SMALL_FAST_MODEL` | Fast model for background tasks | `"claude-haiku-4-5"` |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Reduce non-essential logs | `"1"` |
+| `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` | Disable experimental features | `"1"` |
+
+**Available Claude Code model names:**
+
+| Model Name | Purpose | Backend Model |
+|------------|---------|---------------|
+| `claude-sonnet-4-5` | Main tasks, complex reasoning | Qwen3-Coder-Next-FP8 |
+| `claude-haiku-4-5` | Fast/background tasks | Qwen3-Coder-Next-FP8 |
+
+> **Note:** Replace `ANTHROPIC_BASE_URL` with your actual server address. If running on a remote server, use the public URL or VPN address (e.g., `http://spark-8013.taileaa4a8.ts.net:4000`).
+
 ## Stopping Services
 
 ```bash
@@ -172,6 +227,25 @@ See [docs/troubleshooting.md](docs/troubleshooting.md) for common issues.
 - [Setup Guide](docs/setup.md)
 - [Models](docs/models.md)
 - [Troubleshooting](docs/troubleshooting.md)
+- [AI Agent Configuration](docs/agents.md)
+
+## AI Agents & Clients
+
+The LiteLLM proxy provides an OpenAI-compatible API and works with many AI agents and tools:
+
+| Agent/Tool | API Model | Port | Purpose |
+|------------|-----------|------|---------|
+| Claude Code | `claude-sonnet-4-5`, `claude-haiku-4-5` | 4000 | Terminal-based AI assistant |
+| Cline Code | `claude-sonnet-4-5` | 4000 | VS Code AI assistant |
+| Cursor IDE | `claude-sonnet-4-5` | 4000 | AI-powered code editor |
+| Continue | `claude-sonnet-4-5` | 4000 | Open-source AI assistant |
+| Codeium | `claude-sonnet-4-5` | 4000 | AI coding assistant |
+| OpenWebUI | Direct endpoint | 3000 | Web-based LLM interface |
+| OpenAI SDK | `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
+
+**Full documentation:** See [AI Agent Configuration](docs/agents.md) for detailed setup guides.
+
+> **Note:** All agents support the same backend models - Qwen3-Coder-Next-FP8 and Nemotron-3-Super-120B.
 
 ## Changelog
 

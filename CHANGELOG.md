@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2026-05-02
+
+### Added
+
+- Claude Code support with `claude-sonnet-4-5` and `claude-haiku-4-5` model names
+- LiteLLM configuration updates for better model routing and compatibility
+
 ## [1.0.0] - 2025-05-01
 
 ### Added

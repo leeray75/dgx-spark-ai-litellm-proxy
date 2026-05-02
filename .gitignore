@@ -39,3 +39,4 @@ qdrant-storage/
 # Generated files
 .env.backup
 *.bak
+.clinerules

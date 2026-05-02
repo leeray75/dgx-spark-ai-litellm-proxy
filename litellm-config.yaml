@@ -1,50 +1,84 @@
 # =============================================================================
-# litellm-config.yaml — LiteLLM Configuration
+# litellm-config.yaml
 # =============================================================================
-# Model: Qwen3-Coder-Next-FP8 (primary)
-# Model: Nemotron-3-Super-120B (via docker-compose.nemotron.yml)
-#
-# This configuration enables:
-#   - OpenAI-compatible API endpoints
-#   - Langfuse OTEL tracing
-#   - Automatic token counting
-#   - Rate limiting and budget tracking
+# vLLM is started with --served-model-name qwen3-coder-next
+# So ALL litellm_params.model references must use: hosted_vllm/qwen3-coder-next
 # =============================================================================
 
 model_list:
-  # Qwen3-Coder-Next-FP8 (primary model)
-  - model_name: qwen3-coder-next
+
+  # ── Claude Code: main model ────────────────────────────────────────────────
+  - model_name: claude-sonnet-4-5
     litellm_params:
-      model: openai/qwen3-coder-next
+      model: hosted_vllm/qwen3-coder-next        # matches --served-model-name exactly
       api_base: http://qwen3-coder-next-engine:8000/v1
       api_key: "none"
-      supports_response_api: false
     model_info:
+      max_tokens: 32768
+      max_input_tokens: 32768
+      max_output_tokens: 8192
+      supports_tool_choice: true
+      supports_function_calling: true
+      supports_vision: false
       input_cost_per_token: 0.0000002
       output_cost_per_token: 0.0000006
-      description: Qwen3-Coder-Next-FP8 (80B total, 3B active, FP8 quant)
 
-  # Nemotron-3-Super-120B-A12B-NVFP4 (via separate compose file)
+  # ── Claude Code: background/fast tasks ────────────────────────────────────
+  - model_name: claude-haiku-4-5
+    litellm_params:
+      model: hosted_vllm/qwen3-coder-next        # same backend
+      api_base: http://qwen3-coder-next-engine:8000/v1
+      api_key: "none"
+    model_info:
+      max_tokens: 32768
+      max_input_tokens: 32768
+      max_output_tokens: 8192
+      supports_tool_choice: true
+      supports_function_calling: true
+      supports_vision: false
+      input_cost_per_token: 0.0000002
+      output_cost_per_token: 0.0000006
+
+  # ── Other agents: friendly name ────────────────────────────────────────────
+  - model_name: qwen3-coder-next
+    litellm_params:
+      model: hosted_vllm/qwen3-coder-next
+      api_base: http://qwen3-coder-next-engine:8000/v1
+      api_key: "none"
+    model_info:
+      max_tokens: 32768
+      max_input_tokens: 32768
+      max_output_tokens: 8192
+      supports_tool_choice: true
+      supports_function_calling: true
+      supports_vision: false
+      input_cost_per_token: 0.0000002
+      output_cost_per_token: 0.0000006
+
+  # ── Nemotron (separate compose) ────────────────────────────────────────────
   - model_name: nemotron-super
     litellm_params:
       model: openai/nemotron-super
       api_base: http://nemotron-engine:8000/v1
       api_key: "none"
-      supports_response_api: false
     model_info:
+      max_tokens: 32768
+      max_input_tokens: 32768
+      max_output_tokens: 8192
+      supports_tool_choice: true
+      supports_function_calling: true
+      supports_vision: false
       input_cost_per_token: 0.0000005
       output_cost_per_token: 0.0000015
-      description: Nemotron-3-Super-120B-A12B-NVFP4 (NVFP4 quant)
 
 litellm_settings:
   drop_params: true
   drop_unsupported_params: true
-  supports_response_api: false
-  suppress_proxy_error_logging: true
-  callbacks: ["langfuse_otel"]
-  num_retries: 3
+  modify_params: true
   request_timeout: 600
+  num_retries: 3
   turn_off_message_logging: false
+  callbacks: ["langfuse_otel"]
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
@@ -52,3 +86,4 @@ general_settings:
   litellm_salt_key: os.environ/LITELLM_SALT_KEY
   disable_spend_logs: false
   database_connection_pool_limit: 10
+  enable_responses_api: false
