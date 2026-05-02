@@ -227,6 +227,25 @@ See [docs/troubleshooting.md](docs/troubleshooting.md) for common issues.
 - [Setup Guide](docs/setup.md)
 - [Models](docs/models.md)
 - [Troubleshooting](docs/troubleshooting.md)
+- [AI Agent Configuration](docs/agents.md)
+
+## AI Agents & Clients
+
+The LiteLLM proxy provides an OpenAI-compatible API and works with many AI agents and tools:
+
+| Agent/Tool | API Model | Port | Purpose |
+|------------|-----------|------|---------|
+| Claude Code | `claude-sonnet-4-5`, `claude-haiku-4-5` | 4000 | Terminal-based AI assistant |
+| Cline Code | `claude-sonnet-4-5` | 4000 | VS Code AI assistant |
+| Cursor IDE | `claude-sonnet-4-5` | 4000 | AI-powered code editor |
+| Continue | `claude-sonnet-4-5` | 4000 | Open-source AI assistant |
+| Codeium | `claude-sonnet-4-5` | 4000 | AI coding assistant |
+| OpenWebUI | Direct endpoint | 3000 | Web-based LLM interface |
+| OpenAI SDK | `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
+
+**Full documentation:** See [AI Agent Configuration](docs/agents.md) for detailed setup guides.
+
+> **Note:** All agents support the same backend models - Qwen3-Coder-Next-FP8 and Nemotron-3-Super-120B.
 
 ## Changelog
 
