@@ -154,26 +154,58 @@ curl http://localhost:4000/v1/chat/completions \
 
 ### Claude Code
 
-Configure Claude Code on your host machine to use the LiteLLM proxy:
+Configure Claude Code to use the LiteLLM proxy for local LLM access.
 
-**`.claude.json` or Claude Code settings:**
+#### Setting Up Claude Code
+
+**Location of Claude Code Settings:**
+
+| Platform | File Location |
+|----------|---------------|
+| **Windows** | `C:\Users\<username>\.claude\settings.json` |
+| **macOS/Linux** | `~/.claude/settings.json` |
+
+**Steps to configure:**
+
+1. Open your Claude Code settings file (`settings.json`)
+2. Add the following configuration:
+
 ```json
 {
+  "defaultShell": "bash",
   "env": {
-    "ANTHROPIC_BASE_URL": "http://spark-8013.taileaa4a8.ts.net:4000",
+    "BASH_ENV": "/home/leeray/.bashrc",
+    "ANTHROPIC_BASE_URL": "http://localhost:4000",
     "ANTHROPIC_AUTH_TOKEN": "sk-your-litellm-master-key",
-    "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-5"
+    "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-5",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"
   }
 }
 ```
 
+3. Save the file and restart Claude Code
+
+**Environment Variable Reference:**
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `defaultShell` | Shell to use | `"bash"` |
+| `BASH_ENV` | Bash environment file | `"/home/leeray/.bashrc"` |
+| `ANTHROPIC_BASE_URL` | LiteLLM proxy endpoint | `"http://localhost:4000"` |
+| `ANTHROPIC_AUTH_TOKEN` | Your LiteLLM master key | `"sk-..."` |
+| `ANTHROPIC_SMALL_FAST_MODEL` | Fast model for background tasks | `"claude-haiku-4-5"` |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Reduce non-essential logs | `"1"` |
+| `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` | Disable experimental features | `"1"` |
+
 **Available Claude Code model names:**
+
 | Model Name | Purpose | Backend Model |
 |------------|---------|---------------|
 | `claude-sonnet-4-5` | Main tasks, complex reasoning | Qwen3-Coder-Next-FP8 |
 | `claude-haiku-4-5` | Fast/background tasks | Qwen3-Coder-Next-FP8 |
 
-> **Note:** The proxy forwards Claude API requests to your local vLLM engine. Set `ANTHROPIC_BASE_URL` to your local LiteLLM endpoint (default: `http://localhost:4000`).
+> **Note:** Replace `ANTHROPIC_BASE_URL` with your actual server address. If running on a remote server, use the public URL or VPN address (e.g., `http://spark-8013.taileaa4a8.ts.net:4000`).
 
 ## Stopping Services
 
