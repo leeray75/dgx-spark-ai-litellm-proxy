@@ -9,10 +9,10 @@ The LiteLLM proxy provides an OpenAI-compatible API, which means it works with a
 | Agent/Tool | API Model | Port | Purpose |
 |------------|-----------|------|---------|
 | Claude Code | `claude-sonnet-4-5`, `claude-haiku-4-5` | 4000 | Terminal-based AI assistant |
-| Cline Code | `claude-sonnet-4-5` | 4000 | VS Code AI assistant |
-| Cursor IDE | `claude-sonnet-4-5` | 4000 | AI-powered code editor |
-| Continue | `claude-sonnet-4-5` | 4000 | Open-source AI assistant |
-| Codeium | `claude-sonnet-4-5` | 4000 | AI coding assistant |
+| Cline Code | `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
+| Cursor IDE | `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
+| Continue | `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
+| Codeium | `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
 | OpenWebUI | Direct endpoint | 3000 | Web-based LLM interface |
 | OpenAI SDK | `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
 
@@ -67,7 +67,7 @@ Cline is a VS Code extension that acts as an AI programming assistant, allowing 
 ```json
 {
   "cline.modelConfig": {
-    "model": "claude-sonnet-4-5",
+    "model": "qwen3-coder-next",
     "apiBaseUrl": "http://localhost:4000/v1",
     "apiKey": "sk-your-litellm-master-key",
     "enableClineLogging": true
@@ -104,7 +104,7 @@ Cursor is an AI-powered code editor built on VS Code with integrated LLM capabil
   "cursor.apiProvider": "openai",
   "cursor.openai.baseURL": "http://localhost:4000/v1",
   "cursor.openai.apiKey": "sk-your-litellm-master-key",
-  "cursor.model": "claude-sonnet-4-5",
+  "cursor.model": "qwen3-coder-next",
   "cursor.autoSuggestEnabled": true
 }
 ```
@@ -117,8 +117,8 @@ Cursor allows switching models via the status bar or commands:
 
 | Model | API Model Name | Use Case |
 |-------|---------------|----------|
-| Main | `claude-sonnet-4-5` | Complex coding tasks |
-| Fast | `claude-haiku-4-5` | Quick completions |
+| Main | `qwen3-coder-next` | Complex coding tasks |
+| Fast | `nemotron-super` | Quick completions |
 
 ---
 
@@ -140,7 +140,7 @@ from continue_chainlit import *
 
 # Configure the proxy
 configure(
-    model="claude-sonnet-4-5",
+    model="qwen3-coder-next",
     api_base="http://localhost:4000/v1",
     api_key="sk-your-litellm-master-key"
 )
@@ -152,7 +152,7 @@ configure(
    - Enter:
      - **API Base URL**: `http://localhost:4000/v1`
      - **API Key**: `sk-your-litellm-master-key`
-     - **Model**: `claude-sonnet-4-5`
+     - **Model**: `qwen3-coder-next`
 
 ---
 
@@ -229,9 +229,9 @@ response = client.chat.completions.create(
 
 print(response.choices[0].message.content)
 
-# Using Claude Code model names
+# Using Nemotron-3-Super-120B for reasoning tasks
 response = client.chat.completions.create(
-    model="claude-sonnet-4-5",
+    model="nemotron-super",
     messages=[
         {"role": "user", "content": "Explain quantum entanglement."}
     ]
@@ -242,7 +242,7 @@ response = client.chat.completions.create(
 
 ```python
 stream = client.chat.completions.create(
-    model="claude-sonnet-4-5",
+    model="nemotron-super",
     messages=[
         {"role": "user", "content": "Write a story about AI."}
     ],
@@ -286,9 +286,9 @@ const response = await client.chat.completions.create({
 
 console.log(response.choices[0].message.content);
 
-// Using Claude Code model names
+// Using Nemotron-3-Super-120B for reasoning tasks
 const response2 = await client.chat.completions.create({
-  model: 'claude-sonnet-4-5',
+  model: 'nemotron-super',
   messages: [
     { role: 'user', content: 'Explain neural networks.' }
   ]
@@ -313,8 +313,8 @@ OpenWebUI is a self-hosted web interface for interacting with LLMs.
      - **OpenAI API Key**: `sk-your-litellm-master-key`
 
 3. **Select Model**:
-   - Choose `claude-sonnet-4-5` for main tasks
-   - Choose `claude-haiku-4-5` for faster responses
+   - Choose `qwen3-coder-next` for main tasks
+   - Choose `nemotron-super` for faster responses
 
 ---
 
@@ -353,12 +353,12 @@ response = client.chat.completions.create(
 ### Test API Connection
 
 ```bash
-# Test with curl
+# Test with curl (Qwen3-Coder-Next-FP8)
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-your-litellm-master-key" \
   -d '{
-    "model": "claude-sonnet-4-5",
+    "model": "qwen3-coder-next",
     "messages": [{"role": "user", "content": "Hello!"}],
     "temperature": 0.7
   }'
@@ -374,10 +374,10 @@ client = OpenAI(
     api_key="sk-your-litellm-master-key"
 )
 
-# Simple health check
+# Simple health check (Qwen3-Coder-Next-FP8)
 try:
     response = client.chat.completions.create(
-        model="claude-sonnet-4-5",
+        model="qwen3-coder-next",
         messages=[{"role": "user", "content": "Say 'hello'"}],
         max_tokens=10
     )
