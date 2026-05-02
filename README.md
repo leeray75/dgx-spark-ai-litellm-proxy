@@ -236,10 +236,10 @@ The LiteLLM proxy provides an OpenAI-compatible API and works with many AI agent
 | Agent/Tool | API Model | Port | Purpose |
 |------------|-----------|------|---------|
 | Claude Code | `claude-sonnet-4-5`, `claude-haiku-4-5` | 4000 | Terminal-based AI assistant |
-| Cline Code | `claude-sonnet-4-5` | 4000 | VS Code AI assistant |
-| Cursor IDE | `claude-sonnet-4-5` | 4000 | AI-powered code editor |
-| Continue | `claude-sonnet-4-5` | 4000 | Open-source AI assistant |
-| Codeium | `claude-sonnet-4-5` | 4000 | AI coding assistant |
+| Cline Code | `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
+| Cursor IDE | `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
+| Continue | `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
+| Codeium | `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
 | OpenWebUI | Direct endpoint | 3000 | Web-based LLM interface |
 | OpenAI SDK | `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
 
