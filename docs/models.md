@@ -1,8 +1,45 @@
 # Model Comparison Guide
 
-This guide compares the two supported LLMs for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
+This guide compares the three supported LLMs for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 
 ## Model Overview
+
+### Qwen3.6-27B-FP8 (DEFAULT)
+
+| Attribute | Value |
+|-----------|-------|
+| **Model Name** | Qwen3.6-27B-FP8 |
+| **Provider** | Alibaba Cloud |
+| **Total Parameters** | 27B |
+| **Active Parameters** | 27B (dense) |
+| **Architecture** | Gated DeltaNet (GDN) + Gated Attention |
+| **Quantization** | FP8 |
+| **Context Window** | 262K tokens |
+| **VRAM Required** | ~111 GB |
+| **Model ID** | `Qwen/Qwen3.6-27B-FP8` |
+| **vLLM Image** | `vllm/vllm-openai:v0.19.1-cu130` |
+| **Port** | 8301 |
+
+#### Key Features
+
+- **Gated DeltaNet (GDN)**: Linear attention mechanism for faster inference
+- **Hybrid Architecture**: Combines GDN and Gated Attention
+- **27B Dense Model**: No MoE, all parameters active
+- **Vision-Enabled**: Native multimodal (vision + text) support
+- **Native Reasoning**: `--reasoning-parser qwen3` prevents thinking tokens in output
+- **Native Tool Calling**: `tool-call-parser: qwen3_coder`
+- **Speculative Decoding**: MTP (Multi-step Predictive Training) support
+
+#### Use Cases
+
+- Code generation and completion
+- Technical documentation
+- Programming interview questions
+- Natural language to SQL/JSON
+- General-purpose assistant with coding focus
+- Vision tasks (image analysis)
+
+---
 
 ### Qwen3-Coder-Next-FP8
 
@@ -15,7 +52,7 @@ This guide compares the two supported LLMs for the **NVIDIA DGX Spark (Blackwell
 | **Architecture** | Gated DeltaNet (GDN) + Gated Attention + MoE |
 | **Quantization** | FP8 |
 | **Context Window** | 262K tokens |
-| **VRAM Required** | ~80 GB |
+| **VRAM Required** | ~118 GB |
 | **Model ID** | `Qwen/Qwen3-Coder-Next-FP8` |
 | **vLLM Image** | `vllm/vllm-openai:v0.19.1-cu130` |
 | **Port** | 8300 |
@@ -74,20 +111,43 @@ This guide compares the two supported LLMs for the **NVIDIA DGX Spark (Blackwell
 
 ## Model Comparison
 
-| Feature | Qwen3-Coder-Next-FP8 | Nemotron-3-Super-120B |
-|---------|---------------------|----------------------|
-| **Context** | 262K tokens | 128K tokens |
-| **VRAM** | ~80 GB | ~80 GB |
-| **Output Format** | Standard JSON | Reasoning blocks |
-| **Tool Calling** | Native support | Requires parser |
-| **Best For** | Coding tasks | General reasoning |
-| **Speed** | Faster | Slightly slower |
-| **Reasoning** | Limited | Strong |
-| **API Compatibility** | Better | Good (with plugin) |
+| Feature | Qwen3.6-27B-FP8 | Qwen3-Coder-Next-FP8 | Nemotron-3-Super-120B |
+|---------|-----------------|---------------------|----------------------|
+| **Context** | 262K tokens | 262K tokens | 128K tokens |
+| **VRAM** | ~111 GB | ~118 GB | ~80 GB |
+| **Model Type** | 27B dense | 80B MoE (3B active) | 120B MoE (12B active) |
+| **Output Format** | Standard JSON | Standard JSON | Reasoning blocks |
+| **Vision** | ✅ Yes | ❌ No | ❌ No |
+| **Tool Calling** | Native support | Native support | Requires parser |
+| **Best For** | Coding tasks (default) | Coding tasks | General reasoning |
+| **Speed** | Faster | Fast | Slightly slower |
+| **Reasoning** | Strong (native) | Limited | Strong |
 
 ---
 
 ## Configuration Comparison
+
+### Qwen3.6-27B-FP8 (docker-compose.qwen3.6.yml)
+
+```yaml
+qwen3-6-27b-engine:
+  image: vllm/vllm-openai:v0.19.1-cu130
+  environment:
+    HF_TOKEN: ${HF_TOKEN}
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+    VLLM_NVFP4_GEMM_BACKEND: marlin
+  command:
+    --model Qwen/Qwen3.6-27B-FP8
+    --served-model-name qwen3.6-27b
+    --dtype auto
+    --kv-cache-dtype fp8
+    --max-model-len 262144
+    --mamba-ssm-cache-dtype float32
+    --tool-call-parser qwen3_coder
+    --reasoning-parser qwen3
+    --enable-auto-tool-choice
+    --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+```
 
 ### Qwen3-Coder-Next-FP8 (docker-compose.yml)
 
@@ -133,12 +193,20 @@ nemotron-engine:
 
 ## Selecting the Right Model
 
-### Choose Qwen3-Coder-Next-FP8 if:
+### Choose Qwen3.6-27B-FP8 (default) if:
 
 - You need **262K context** for long documents
 - You're doing **coding tasks** (Python, JavaScript, etc.)
+- You want **vision support** (image analysis)
 - You need **faster inference** with native tool calling
-- You prefer **standard output format**
+- You prefer **native reasoning** without thinking token leakage
+
+### Choose Qwen3-Coder-Next-FP8 if:
+
+- You need the **80B MoE** model for specific workloads
+- You need **262K context** for long documents
+- You're doing **coding tasks**
+- You need **faster inference** with native tool calling
 
 ### Choose Nemotron-3-Super-120B if:
 
@@ -153,35 +221,38 @@ nemotron-engine:
 
 The LiteLLM proxy supports Claude Code API compatibility through virtual model names.
 
-### claude-sonnet-4-5
+### claude-sonnet-4-6 (DEFAULT)
 
 | Attribute | Value |
 |-----------|-------|
-| **Model Name** | claude-sonnet-4-5 |
+| **Model Name** | claude-sonnet-4-6 |
 | **Purpose** | Main tasks, complex reasoning |
-| **Backend** | Qwen3-Coder-Next-FP8 (vLLM port 8300) |
-| **Max Tokens** | 32,768 input / 8,192 output |
+| **Backend** | Qwen3.6-27B-FP8 (vLLM port 8301) |
+| **Max Tokens** | 262,144 input / 16,384 output |
 | **Tool Calling** | Supported |
 | **Function Calling** | Supported |
+| **Vision** | Supported |
 
 **Use Cases:**
 - Complex multi-step reasoning tasks
 - Code generation and analysis
 - Technical documentation
+- Vision tasks (image analysis)
 - General assistant with coding focus
 
 ---
 
-### claude-haiku-4-5
+### claude-haiku-4-6
 
 | Attribute | Value |
 |-----------|-------|
-| **Model Name** | claude-haiku-4-5 |
+| **Model Name** | claude-haiku-4-6 |
 | **Purpose** | Fast/background tasks |
-| **Backend** | Qwen3-Coder-Next-FP8 (vLLM port 8300) |
-| **Max Tokens** | 32,768 input / 8,192 output |
+| **Backend** | Qwen3.6-27B-FP8 (vLLM port 8301) |
+| **Max Tokens** | 32,768 input / 4,096 output |
 | **Tool Calling** | Supported |
 | **Function Calling** | Supported |
+| **Vision** | Supported |
 
 **Use Cases:**
 - Fast background processing
@@ -193,10 +264,25 @@ The LiteLLM proxy supports Claude Code API compatibility through virtual model n
 
 ## Testing Models
 
+### Test Qwen3.6-27B-FP8 (default)
+
+```bash
+# Switch to Qwen3.6
+./scripts/model-switch.sh qwen3.6
+
+# Test API
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -d '{
+    "model": "qwen3.6-27b",
+    "messages": [{"role": "user", "content": "Write a Python function to sort a list."}]
+  }'
+```
+
 ### Test Qwen3-Coder-Next-FP8
 
 ```bash
-# Switch to Qwen
+# Switch to Qwen3-Coder-Next
 ./scripts/model-switch.sh qwen
 
 # Test API
@@ -221,3 +307,4 @@ curl http://localhost:4000/v1/chat/completions \
     "model": "nemotron-super",
     "messages": [{"role": "user", "content": "Explain the concept of quantum entanglement."}]
   }'
+  ```

@@ -30,17 +30,17 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 │                    │                         │                             │
 │          ┌─────────▼─────────┐   ┌───────────▼────────────┐               │
 │          │  Langfuse Worker  │   │   Qwen3 Engine         │               │
-│          │  (Async Events)   │   │   (vLLM, 8300)         │               │
+│          │  (Async Events)   │   │   (vLLM, 8301)         │               │
 │          └─────────┬─────────┘   └────────────────────────┘               │
 │                    │                                                      │
-│          ┌─────────▼─────────┐                                            │
-│          │  Langfuse Web     │   ┌────────────────────────┐               │
-│          │  (Observability)  │   │   Nemotron Engine      │               │
-│          └─────────┬─────────┘   │   (vLLM, 8200)         │               │
-│                    │             └────────────────────────┘               │
-│          ┌─────────▼─────────┐                                            │
-│          │  PostgreSQL       │                                            │
-│          │  (Langfuse +      │                                            │
+│          ┌─────────▼─────────┐   ┌────────────────────────┐               │
+│          │  Langfuse Web     │   │   Qwen3-Coder Engine   │               │
+│          │  (Observability)  │   │   (vLLM, 8300)         │               │
+│          └─────────┬─────────┘   └────────────────────────┘               │
+│                    │             ┌────────────────────────┐               │
+│          ┌─────────▼─────────┐   │   Nemotron Engine      │               │
+│          │  PostgreSQL       │   │   (vLLM, 8200)         │               │
+│          │  (Langfuse +      │   └────────────────────────┘               │
 │          │   LiteLLM DBs)    │                                            │
 │          └─────────┬─────────┘                                            │
 │                    │                                                      │
@@ -74,7 +74,8 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 
 | Service | Image | Port | Model | Quantization |
 |---------|-------|------|-------|--------------|
-| Qwen3 Engine | `vllm/vllm-openai:v0.19.1-cu130` | 8300 | Qwen3-Coder-Next-FP8 | FP8 |
+| Qwen3 Engine | `vllm/vllm-openai:v0.19.1-cu130` | 8301 | Qwen3.6-27B-FP8 | FP8 |
+| Qwen3-Coder Engine | `vllm/vllm-openai:v0.19.1-cu130` | 8300 | Qwen3-Coder-Next-FP8 | FP8 |
 | Nemotron Engine | `vllm/vllm-openai:v0.18.1-cu130` | 8200 | Nemotron-3-Super-120B | NVFP4 |
 
 ### Proxy Layer
@@ -99,7 +100,8 @@ All services connect via a Docker bridge network called `ai-bridge`:
 |------|---------|---------------|---------|
 | 3000 | Langfuse Web | External | Web UI, API |
 | 4000 | LiteLLM | External | OpenAI-compatible API |
-| 8300 | Qwen Engine | External | Direct vLLM access |
+| 8301 | Qwen3 Engine | External | Direct vLLM access (Qwen3.6) |
+| 8300 | Qwen3-Coder Engine | External | Direct vLLM access (Qwen3-Coder) |
 | 8200 | Nemotron Engine | External | Direct vLLM access |
 | 9090 | MinIO S3 API | External | Blob storage API |
 | 9091 | MinIO Console | External | MinIO admin UI |
@@ -112,7 +114,7 @@ All services connect via a Docker bridge network called `ai-bridge`:
 ## Data Flow
 
 1. **Client Request** → LiteLLM Proxy (4000)
-2. **LiteLLM** → Routes to appropriate vLLM engine (8300 or 8200)
+2. **LiteLLM** → Routes to appropriate vLLM engine (8301, 8300, or 8200)
 3. **vLLM** → Generates response with model
 4. **Response** → Back to client
 5. **Langfuse OTEL** → Captures trace data from LiteLLM
@@ -121,13 +123,25 @@ All services connect via a Docker bridge network called `ai-bridge`:
 
 ## Model Details
 
+### Qwen3.6-27B-FP8 (DEFAULT)
+
+- **Size**: 27B total parameters (dense)
+- **Architecture**: Gated DeltaNet (GDN) + Gated Attention
+- **Quantization**: FP8
+- **Context**: 262K tokens
+- **GPU Memory**: ~111GB required
+- **Vision Support**: Native multimodal (vision + text)
+- **Reasoning**: Native thinking tokens with `--reasoning-parser qwen3`
+- **Special**: MTP (Multi-step Predictive Training) support
+
 ### Qwen3-Coder-Next-FP8
 
 - **Size**: 80B total parameters, 3B active
 - **Architecture**: Gated DeltaNet (GDN) + Gated Attention + MoE
 - **Quantization**: FP8
 - **Context**: 262K tokens
-- **GPU Memory**: ~80GB required
+- **GPU Memory**: ~118GB required
+- **Special**: 512 experts, 10 active per forward pass
 
 ### Nemotron-3-Super-120B-A12B-NVFP4
 
