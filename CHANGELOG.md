@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2026-05-03
+
+### Added
+
+- Qwen3.6-27B-FP8 support (new default model)
+- Vision support in LiteLLM for Qwen3.6 (image analysis)
+- `qwen3_reasoning_parser.py` script for proper reasoning token handling
+- `qwen3.6` model option in `model-switch.sh` and `restart.sh` scripts
+
+### Changed
+
+- **Default model**: Qwen3.6-27B-FP8 now serves as the default model
+- **Claude Code aliases**: Updated to `claude-sonnet-4-6` and `claude-haiku-4-6`
+- **LiteLLM config**: Added `qwen3.6-27b` model entry with vision support
+
+### Improvements
+
+- Full 262K context window support for Qwen3.6-27B-FP8
+- Better token efficiency with native reasoning parser
+- Optimized GPU memory utilization (~111GB for Qwen3.6 vs ~118GB for Coder-Next)
+
+### Configuration
+
+- New compose file: `docker-compose.qwen3.6.yml` - standalone stack with Qwen3.6 as default
+- LiteLLM config updated with vision-enabled model entries
+- `--reasoning-parser qwen3` added to prevent thinking token leakage in output
+- `--default-chat-template-kwargs '{"preserve_thinking":true}'` for proper reasoning
+
+### Architecture
+
+- **Langfuse Services**: Web UI, Worker, PostgreSQL, ClickHouse, Redis, MinIO
+- **Inference Engines**: 
+  - vLLM for Qwen3.6-27B-FP8 (port 8301) - DEFAULT
+  - vLLM for Qwen3-Coder-Next-FP8 (port 8300)
+  - vLLM for Nemotron-3-Super-120B (port 8200)
+- **Proxy Layer**: LiteLLM with OTEL tracing to Langfuse
+
+### Breaking Changes
+
+- None - all changes are additive and backwards compatible
+
 ## [1.1.1] - 2026-05-02
 
 ### Fixed

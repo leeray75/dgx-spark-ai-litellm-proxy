@@ -1,0 +1,472 @@
+# =============================================================================
+# docker-compose.qwen3.6.yml — Qwen3.6-27B-FP8 on NVIDIA DGX Spark (Blackwell GB10)
+#
+# Main stack configuration - Qwen3.6-27B-FP8 is the default model.
+# Includes full Langfuse/LiteLLM observability stack.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.qwen3.6.yml up -d
+#   (Qwen3.6 is now the default; run without this file to use Coder-Next)
+#
+# Source: https://huggingface.co/Qwen/Qwen3.6-27B-FP8
+#
+# Hardware: NVIDIA DGX Spark workstation with GB10 Superchip (128 GB unified memory)
+#
+# Image:    vllm/vllm-openai:v0.19.1-cu130  (ARM64, cu130, same as Qwen3-Coder-Next)
+#           vllm>=0.19.0 is required per official docs
+# Model:    Qwen/Qwen3.6-27B-FP8
+#           27B dense Causal Language Model with Vision Encoder
+#           Hybrid GDN (Gated DeltaNet) + Gated Attention architecture
+#           Native multimodal (vision + text), 262K context natively
+#           Extensible up to 1,010,000 tokens via YaRN
+#
+# Architecture (from official model card):
+#   - Hidden Layout: 16 × (3 × (Gated DeltaNet → FFN) → 1 × (Gated Attention → FFN))
+#   - Gated DeltaNet: 48 heads for V, 16 for QK, head dim 128
+#   - Gated Attention: 24 heads for Q, 4 for KV, head dim 256
+#   - MTP: trained with multi-steps (native speculative decoding support)
+#   - Same GDN hybrid attention as Qwen3-Coder-Next — mamba-ssm-cache-dtype float32 required
+#
+# Corrections vs first draft (verified against official HuggingFace model card):
+#
+#   1. REMOVED --quantization fp8
+#      Official vLLM examples do NOT pass --quantization for FP8 checkpoint variants.
+#      --dtype auto correctly detects pre-quantized FP8 weights. Adding --quantization fp8
+#      on a pre-quantized checkpoint can cause conflicts.
+#
+#   2. FIXED speculative method: "mtp" → "qwen3_next_mtp"
+#      Official docs specify: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+#      "mtp" is generic vLLM; "qwen3_next_mtp" is the model-specific correct method.
+#
+#   3. FIXED num_speculative_tokens: 1 → 2
+#      Official recommendation is 2 for this model.
+#
+#   4. CONFIRMED --language-model-only is official
+#      Explicitly in official vLLM serving section: "skips the vision encoder and
+#      multimodal profiling to free up memory for additional KV cache"
+#
+#   5. CONFIRMED --reasoning-parser qwen3 required
+#      Model thinks by default; without this flag thinking tokens leak into output.
+#
+#   6. ADDED --override-generation-config per official best practices
+#      For precise coding tasks: temperature=0.6, top_p=0.95, top_k=20, min_p=0.0
+#
+# Sampling parameters (official best practices):
+#   Coding tasks:   temperature=0.6, top_p=0.95, top_k=20, min_p=0.0
+#   General tasks:  temperature=1.0, top_p=0.95, top_k=20, min_p=0.0
+#   Non-thinking:   temperature=0.7, top_p=0.80, top_k=20, presence_penalty=1.5
+#
+# Memory on GB10 (128GB unified):
+#   Model weights (FP8):  ~27GB
+#   KV cache (fp8, 0.85): ~80GB
+#   Framework overhead:   ~4GB
+#   Total:                ~111GB
+#
+# NOTE: Cannot run simultaneously with Qwen3-Coder-Next at gpu-memory-utilization 0.92
+#       (~118GB). Stop Coder-Next first, or split budget between both engines.
+#
+# External ports (reachable from other machines):
+#   3000  — Langfuse UI + API
+#   4000  — LiteLLM Proxy (OpenAI-compatible) + UI at /ui
+#   8301  — vLLM engine (direct; prefer routing via LiteLLM on 4000)
+#   9090  — MinIO S3 API
+#   9091  — MinIO console UI
+#
+# Internal-only ports (127.0.0.1 — local machine only):
+#   5432  — PostgreSQL
+#   8123  — ClickHouse HTTP
+#   9000  — ClickHouse native protocol
+#   6379  — Redis
+#   3030  — Langfuse worker
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — shared instance; two isolated databases:
+  #   "postgres" for Langfuse, "litellm" for LiteLLM
+  # TZ=UTC / PGTZ=UTC required — non-UTC causes incorrect Langfuse query results
+  # Tuned: shared_buffers, work_mem, WAL compression, checkpoint settings
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: langfuse-postgres
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}           # set in .env
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}             # Langfuse DB (default)
+      TZ: UTC                                            # required by Langfuse v3
+      PGTZ: UTC
+    command: >
+      postgres
+      -c shared_buffers=512MB
+      -c effective_cache_size=1GB
+      -c work_mem=16MB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_compression=on
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+      # Creates the "litellm" database on first start so LiteLLM has its own schema
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # ClickHouse — OLAP store for Langfuse traces, observations, and scores
+  # Single-node with built-in Keeper (no external ZooKeeper needed)
+  # Memory capped to prevent greedy RAM usage alongside vLLM
+  # ---------------------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: langfuse-clickhouse
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:8123:8123"   # HTTP interface (used by Langfuse web + worker)
+      - "127.0.0.1:9000:9000"   # Native protocol (used for schema migrations)
+    volumes:
+      - langfuse-clickhouse-data:/var/lib/clickhouse
+      - langfuse-clickhouse-logs:/var/log/clickhouse-server
+      - ./clickhouse-config.xml:/etc/clickhouse-server/config.d/langfuse.xml:ro
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}       # set in .env
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-default}
+      CLICKHOUSE_MAX_SERVER_MEMORY_USAGE_TO_RAM_RATIO: "0.3"   # cap CH memory; prevents competing with vLLM
+    healthcheck:
+      test: ["CMD", "clickhouse-client",
+             "--user", "${CLICKHOUSE_USER:-clickhouse}",
+             "--password", "${CLICKHOUSE_PASSWORD}",
+             "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis — Langfuse event queue + API-key / prompt cache
+  #         LiteLLM exact-match prompt cache (new)
+  # maxmemory-policy noeviction is REQUIRED — prevents queue job eviction
+  # RDB snapshots and AOF disabled — pure queue/cache workload, no persistence needed
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: langfuse-redis
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: >
+      --requirepass ${REDIS_AUTH}
+      --maxmemory-policy noeviction
+      --save ""
+      --appendonly no
+    volumes:
+      - langfuse-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_AUTH}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-compatible blob storage for Langfuse trace event payloads
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio
+    container_name: langfuse-minio
+    networks:
+      - ai-bridge
+    ports:
+      - "9090:9000"    # S3 API
+      - "9091:9001"    # MinIO console UI
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}       # set in .env
+    command: server /data --console-address ":9001"
+    volumes:
+      - langfuse-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MinIO Init — creates the "langfuse" bucket on first start, then exits
+  # ---------------------------------------------------------------------------
+  minio-init:
+    image: minio/mc
+    container_name: langfuse-minio-init
+    networks:
+      - ai-bridge
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minio} ${MINIO_ROOT_PASSWORD};
+        mc mb --ignore-existing local/langfuse;
+        echo 'MinIO bucket ready';
+      "
+    restart: on-failure
+
+  # ---------------------------------------------------------------------------
+  # Langfuse Worker — async event processor (REQUIRED in v3)
+  # Reads events from Redis queue → writes to ClickHouse + S3/MinIO
+  # ---------------------------------------------------------------------------
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: langfuse-worker
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:3030:3030"
+    depends_on: &langfuse-depends-on
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-postgres}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}               # set in .env
+      SALT: ${LANGFUSE_SALT}                            # set in .env
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}        # openssl rand -hex 32
+
+      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
+
+      # ClickHouse — plain base URL; credentials via separate vars
+      CLICKHOUSE_MIGRATION_URL: clickhouse://${CLICKHOUSE_USER:-clickhouse}:${CLICKHOUSE_PASSWORD}@clickhouse:9000/${CLICKHOUSE_DATABASE:-default}
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+
+      # S3 / MinIO — event uploads
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+
+      # S3 / MinIO — media uploads
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_EXTERNAL_ENDPOINT: http://localhost:9090
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+
+      # S3 / MinIO — batch exports (disabled by default)
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+      LANGFUSE_S3_BATCH_EXPORT_BUCKET: langfuse
+      LANGFUSE_S3_BATCH_EXPORT_PREFIX: exports/
+      LANGFUSE_S3_BATCH_EXPORT_REGION: us-east-1
+      LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT: http://localhost:9090
+      LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: "true"
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: ${REDIS_AUTH}
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Langfuse Web — UI + public ingestion API
+  # ---------------------------------------------------------------------------
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: langfuse
+    networks:
+      - ai-bridge
+    ports:
+      - "3000:3000"
+    depends_on: *langfuse-depends-on
+    environment:
+      <<: *langfuse-env
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # vLLM Engine — Qwen3.6-27B-FP8 (DEFAULT MODEL)
+  # ARM64 / GB10 Superchip, 128 GB unified memory
+  #
+  # Performance tuning (vs original):
+  #   gpu-memory-utilization 0.88→0.92   GB10 unified memory stable higher
+  #   max-num-seqs          16→32        KV cache was only ~2% used; huge headroom
+  #   max-num-batched-tokens 16384→32768 matches the increased seq capacity
+  #   scheduler-delay-factor 0.3         batches more decode steps → higher gen t/s
+  #   uvicorn-log-level warning          cuts log noise, marginal CPU savings
+  #   shm_size 16gb                      prevents IPC issues under concurrent load
+  #   ulimits memlock/stack              standard for GPU inference workloads
+  # ---------------------------------------------------------------------------
+  qwen3-6-27b-engine:
+    image: vllm/vllm-openai:v0.19.1-cu130
+    platform: linux/arm64
+    container_name: qwen3-6-27b-engine
+    networks:
+      - ai-bridge
+    ports:
+      - "8301:8000"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+      VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+      VLLM_NVFP4_GEMM_BACKEND: marlin
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ipc: host
+    shm_size: '16gb'
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      stack:
+        soft: 67108864
+        hard: 67108864
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 120
+      start_period: 600s
+    command: >
+      Qwen/Qwen3.6-27B-FP8
+      --served-model-name qwen3.6-27b
+      --host 0.0.0.0
+      --port 8000
+      --dtype auto
+      --kv-cache-dtype fp8
+      --tensor-parallel-size 1
+      --gpu-memory-utilization 0.85
+      --max-model-len 262144
+      --max-num-seqs 32
+      --enable-chunked-prefill
+      --max-num-batched-tokens 32768
+      --mamba-ssm-cache-dtype float32
+      --max-cudagraph-capture-size 128
+      --attention-backend flashinfer
+      --uvicorn-log-level warning
+      --trust-remote-code
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --reasoning-parser qwen3
+      --enable-prefix-caching
+      --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+      --default-chat-template-kwargs '{"preserve_thinking":true}'
+      --language-model-only
+      --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # LiteLLM Proxy — unified OpenAI-compatible API + Langfuse OTEL tracing
+  #
+  # DATABASE_URL points to the "litellm" database on the shared Postgres instance
+  # (separate from the "postgres" database used by Langfuse). This enables:
+  #   - Virtual key management  (/key/generate, /key/delete)
+  #   - Spend tracking per key/team/user
+  #   - LiteLLM UI at http://<host>:4000/ui  (login with master key)
+  #   - Budget alerts and rate-limit enforcement
+  #
+  # Without DATABASE_URL, master_key still authenticates requests but all of
+  # the above features are unavailable and nothing persists across restarts.
+  #
+  # Redis cache (new): serves exact-match repeated prompts without hitting vLLM.
+  # Pairs well with the 75-81% prefix cache hit rate seen in vLLM logs — prompts
+  # that are 100% identical are short-circuited before they even reach the engine.
+  # ---------------------------------------------------------------------------
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm-proxy
+    networks:
+      - ai-bridge
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}         # set in .env — must start with sk-
+      LITELLM_DROP_PARAMS: ${LITELLM_DROP_PARAMS:-true}
+      LITELLM_MODIFY_PARAMS: ${LITELLM_MODIFY_PARAMS:-true}
+      # LiteLLM's own Postgres DB (separate schema from Langfuse)
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      # Encrypt virtual key data at rest — set once, never change after first key is created
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}             # set in .env — openssl rand -hex 32
+      # Langfuse OTEL — consumed by langfuse_otel callback in litellm_config.yaml
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      # Container-to-container: use service name, not Tailscale hostname
+      LANGFUSE_OTEL_HOST: http://langfuse:3000
+      LANGFUSE_HOST: ${LANGFUSE_HOST}                   # External URL — set in .env
+      # Redis exact-match prompt cache — short-circuits vLLM for identical requests
+      LITELLM_CACHE: "true"
+      LITELLM_CACHE_TYPE: "redis"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_AUTH}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qwen3-6-27b-engine:
+        condition: service_healthy
+      langfuse-web:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--drop_params"]
+    restart: always
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  ai-bridge:
+    driver: bridge
+
+# =============================================================================
+# Named volumes
+# =============================================================================
+volumes:
+  langfuse-postgres-data:
+  langfuse-clickhouse-data:
+  langfuse-clickhouse-logs:
+  langfuse-minio-data:
+  langfuse-redis-data:

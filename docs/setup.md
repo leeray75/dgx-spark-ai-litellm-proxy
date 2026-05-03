@@ -95,7 +95,13 @@ openssl rand -hex 32  # For LITELLM_SALT_KEY
 
 ### 5. Start the Stack
 
-#### Start with Qwen3-Coder-Next-FP8 (default):
+#### Start with Qwen3.6-27B-FP8 (default):
+
+```bash
+docker compose -f docker-compose.qwen3.6.yml up -d
+```
+
+#### Or start with Qwen3-Coder-Next-FP8:
 
 ```bash
 docker compose up -d
@@ -117,7 +123,9 @@ docker compose ps
 docker compose logs -f
 
 # Check specific service logs
-docker compose logs -f qwen3-coder-next-engine
+docker compose logs -f qwen3-6-27b-engine    # For Qwen3.6
+docker compose logs -f qwen3-coder-next-engine # For Qwen3-Coder
+docker compose logs -f nemotron-engine        # For Nemotron
 ```
 
 ### 7. Wait for Services to Start
@@ -128,7 +136,8 @@ docker compose logs -f qwen3-coder-next-engine
 
 ```bash
 # Check vLLM health
-curl http://localhost:8300/health  # For Qwen
+curl http://localhost:8301/health  # For Qwen3.6
+curl http://localhost:8300/health  # For Qwen3-Coder
 curl http://localhost:8200/health  # For Nemotron
 ```
 
@@ -147,6 +156,16 @@ curl http://localhost:8200/health  # For Nemotron
 ```bash
 # Set your master key
 export LITELLM_MASTER_KEY=sk-your-master-key
+
+# Test Qwen3.6-27B-FP8 (default)
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -d '{
+    "model": "qwen3.6-27b",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "temperature": 0.7
+  }'
 
 # Test Qwen3-Coder-Next-FP8
 curl http://localhost:4000/v1/chat/completions \
@@ -172,20 +191,20 @@ curl http://localhost:4000/v1/chat/completions \
 ### Test Claude Code Models
 
 ```bash
-# claude-sonnet-4-5 (main tasks)
+# claude-sonnet-4-6 (main tasks, Qwen3.6)
 curl http://localhost:4000/v1/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -d '{
-    "model": "claude-sonnet-4-5",
+    "model": "claude-sonnet-4-6",
     "messages": [{"role": "user", "content": "Hello!"}],
     "temperature": 0.7
   }'
 
-# claude-haiku-4-5 (fast tasks)
+# claude-haiku-4-6 (fast tasks, Qwen3.6)
 curl http://localhost:4000/v1/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -d '{
-    "model": "claude-haiku-4-5",
+    "model": "claude-haiku-4-6",
     "messages": [{"role": "user", "content": "Hello!"}],
     "temperature": 0.7
   }'
@@ -196,6 +215,9 @@ curl http://localhost:4000/v1/chat/completions \
 To switch between models after installation:
 
 ```bash
+# Switch to Qwen3.6-27B-FP8 (default)
+./scripts/model-switch.sh qwen3.6
+
 # Switch to Qwen3-Coder-Next-FP8
 ./scripts/model-switch.sh qwen
 

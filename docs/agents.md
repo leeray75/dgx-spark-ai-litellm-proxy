@@ -8,13 +8,13 @@ The LiteLLM proxy provides an OpenAI-compatible API, which means it works with a
 
 | Agent/Tool | API Model | Port | Purpose |
 |------------|-----------|------|---------|
-| Claude Code | `claude-sonnet-4-5`, `claude-haiku-4-5` | 4000 | Terminal-based AI assistant |
-| Cline Code | `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
-| Cursor IDE | `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
-| Continue | `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
-| Codeium | `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
+| Claude Code | `claude-sonnet-4-6`, `claude-haiku-4-6` | 4000 | Terminal-based AI assistant |
+| Cline Code | `qwen3.6-27b`, `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
+| Cursor IDE | `qwen3.6-27b`, `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
+| Continue | `qwen3.6-27b`, `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
+| Codeium | `qwen3.6-27b`, `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
 | OpenWebUI | Direct endpoint | 3000 | Web-based LLM interface |
-| OpenAI SDK | `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
+| OpenAI SDK | `qwen3.6-27b`, `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
 
 ---
 
@@ -40,7 +40,7 @@ Claude Code is a terminal-based AI assistant from Anthropic.
     "BASH_ENV": "/home/leeray/.bashrc",
     "ANTHROPIC_BASE_URL": "http://localhost:4000",
     "ANTHROPIC_AUTH_TOKEN": "sk-your-litellm-master-key",
-    "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-5",
+    "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-6",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"
   }
@@ -67,7 +67,7 @@ Cline is a VS Code extension that acts as an AI programming assistant, allowing 
 ```json
 {
   "cline.modelConfig": {
-    "model": "qwen3-coder-next",
+    "model": "qwen3.6-27b",
     "apiBaseUrl": "http://localhost:4000/v1",
     "apiKey": "sk-your-litellm-master-key",
     "enableClineLogging": true
@@ -104,7 +104,7 @@ Cursor is an AI-powered code editor built on VS Code with integrated LLM capabil
   "cursor.apiProvider": "openai",
   "cursor.openai.baseURL": "http://localhost:4000/v1",
   "cursor.openai.apiKey": "sk-your-litellm-master-key",
-  "cursor.model": "qwen3-coder-next",
+  "cursor.model": "qwen3.6-27b",
   "cursor.autoSuggestEnabled": true
 }
 ```
@@ -117,8 +117,9 @@ Cursor allows switching models via the status bar or commands:
 
 | Model | API Model Name | Use Case |
 |-------|---------------|----------|
-| Main | `qwen3-coder-next` | Complex coding tasks |
-| Fast | `nemotron-super` | Quick completions |
+| Main | `qwen3.6-27b` | Complex coding tasks, vision support |
+| Fast | `claude-haiku-4-6` | Quick completions |
+| Nemotron | `nemotron-super` | Reasoning tasks |
 
 ---
 
@@ -140,7 +141,7 @@ from continue_chainlit import *
 
 # Configure the proxy
 configure(
-    model="qwen3-coder-next",
+    model="qwen3.6-27b",
     api_base="http://localhost:4000/v1",
     api_key="sk-your-litellm-master-key"
 )
@@ -152,7 +153,7 @@ configure(
    - Enter:
      - **API Base URL**: `http://localhost:4000/v1`
      - **API Key**: `sk-your-litellm-master-key`
-     - **Model**: `qwen3-coder-next`
+     - **Model**: `qwen3.6-27b`
 
 ---
 
@@ -217,6 +218,18 @@ client = OpenAI(
     api_key="sk-your-litellm-master-key"
 )
 
+# Qwen3.6-27B-FP8 (default)
+response = client.chat.completions.create(
+    model="qwen3.6-27b",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Write a Python function to sort a list."}
+    ],
+    temperature=0.7
+)
+
+print(response.choices[0].message.content)
+
 # Qwen3-Coder-Next-FP8
 response = client.chat.completions.create(
     model="qwen3-coder-next",
@@ -226,8 +239,6 @@ response = client.chat.completions.create(
     ],
     temperature=0.7
 )
-
-print(response.choices[0].message.content)
 
 # Using Nemotron-3-Super-120B for reasoning tasks
 response = client.chat.completions.create(
@@ -274,9 +285,9 @@ const client = new OpenAI({
   apiKey: 'sk-your-litellm-master-key'
 });
 
-// Qwen3-Coder-Next-FP8
+// Qwen3.6-27B-FP8 (default)
 const response = await client.chat.completions.create({
-  model: 'qwen3-coder-next',
+  model: 'qwen3.6-27b',
   messages: [
     { role: 'system', content: 'You are a helpful assistant.' },
     { role: 'user', content: 'Write a JavaScript function to sort an array.' }
@@ -286,8 +297,18 @@ const response = await client.chat.completions.create({
 
 console.log(response.choices[0].message.content);
 
-// Using Nemotron-3-Super-120B for reasoning tasks
+// Qwen3-Coder-Next-FP8
 const response2 = await client.chat.completions.create({
+  model: 'qwen3-coder-next',
+  messages: [
+    { role: 'system', content: 'You are a helpful assistant.' },
+    { role: 'user', content: 'Write a JavaScript function to sort an array.' }
+  ],
+  temperature: 0.7
+});
+
+// Using Nemotron-3-Super-120B for reasoning tasks
+const response3 = await client.chat.completions.create({
   model: 'nemotron-super',
   messages: [
     { role: 'user', content: 'Explain neural networks.' }
@@ -313,8 +334,9 @@ OpenWebUI is a self-hosted web interface for interacting with LLMs.
      - **OpenAI API Key**: `sk-your-litellm-master-key`
 
 3. **Select Model**:
-   - Choose `qwen3-coder-next` for main tasks
-   - Choose `nemotron-super` for faster responses
+   - Choose `qwen3.6-27b` for main tasks
+   - Choose `qwen3-coder-next` for coding tasks
+   - Choose `nemotron-super` for reasoning tasks
 
 ---
 
@@ -324,9 +346,10 @@ OpenWebUI is a self-hosted web interface for interacting with LLMs.
 
 | Model Name | Purpose | Backend Model |
 |------------|---------|---------------|
-| `claude-sonnet-4-5` | Main tasks, complex reasoning | Qwen3-Coder-Next-FP8 |
-| `claude-haiku-4-5` | Fast/background tasks | Qwen3-Coder-Next-FP8 |
-| `qwen3-coder-next` | Direct access to Qwen model | Qwen3-Coder-Next-FP8 |
+| `claude-sonnet-4-6` | Main tasks, complex reasoning | Qwen3.6-27B-FP8 |
+| `claude-haiku-4-6` | Fast/background tasks | Qwen3.6-27B-FP8 |
+| `qwen3.6-27b` | Direct access to Qwen3.6 model | Qwen3.6-27B-FP8 |
+| `qwen3-coder-next` | Direct access to Qwen3-Coder model | Qwen3-Coder-Next-FP8 |
 | `nemotron-super` | Direct access to Nemotron model | Nemotron-3-Super-120B |
 
 ### Using Different Models in Your Code
@@ -334,14 +357,15 @@ OpenWebUI is a self-hosted web interface for interacting with LLMs.
 ```python
 # Python - Switch between models
 models = {
-    'main': 'claude-sonnet-4-5',
-    'fast': 'claude-haiku-4-5',
+    'main': 'claude-sonnet-4-6',
+    'fast': 'claude-haiku-4-6',
+    'qwen3.6': 'qwen3.6-27b',
     'qwen': 'qwen3-coder-next',
     'nemotron': 'nemotron-super'
 }
 
 response = client.chat.completions.create(
-    model=models['main'],  # or models['fast'], models['qwen'], etc.
+    model=models['main'],  # or models['fast'], models['qwen3.6'], etc.
     messages=[...]
 )
 ```
@@ -353,6 +377,16 @@ response = client.chat.completions.create(
 ### Test API Connection
 
 ```bash
+# Test with curl (Qwen3.6-27B-FP8)
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-your-litellm-master-key" \
+  -d '{
+    "model": "qwen3.6-27b",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "temperature": 0.7
+  }'
+
 # Test with curl (Qwen3-Coder-Next-FP8)
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -374,10 +408,10 @@ client = OpenAI(
     api_key="sk-your-litellm-master-key"
 )
 
-# Simple health check (Qwen3-Coder-Next-FP8)
+# Simple health check (Qwen3.6-27B-FP8)
 try:
     response = client.chat.completions.create(
-        model="qwen3-coder-next",
+        model="qwen3.6-27b",
         messages=[{"role": "user", "content": "Say 'hello'"}],
         max_tokens=10
     )
@@ -406,5 +440,5 @@ except Exception as e:
 - Ensure the model name is in the list
 
 **4. Slow Responses**
-- Check vLLM engine logs: `docker compose logs qwen3-coder-next-engine`
+- Check vLLM engine logs: `docker compose logs qwen3-6-27b-engine`
 - Verify GPU is not out of memory: `nvidia-smi`
