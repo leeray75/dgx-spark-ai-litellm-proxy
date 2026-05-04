@@ -376,9 +376,9 @@ services:
       --dtype auto
       --kv-cache-dtype fp8
       --tensor-parallel-size 1
-      --gpu-memory-utilization 0.85
+      --gpu-memory-utilization 0.60
       --max-model-len 262144
-      --max-num-seqs 32
+      --max-num-seqs 20
       --enable-chunked-prefill
       --max-num-batched-tokens 32768
       --mamba-ssm-cache-dtype float32
@@ -392,7 +392,6 @@ services:
       --enable-prefix-caching
       --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
       --default-chat-template-kwargs '{"preserve_thinking":true}'
-      --language-model-only
       --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
     restart: unless-stopped
 

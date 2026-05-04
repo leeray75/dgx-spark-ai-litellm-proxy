@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.1] - 2026-05-04
+
+### Changed
+
+- **Qwen3.6 GPU memory utilization** reduced from 0.85 to 0.60 — provides headroom for large context windows and speculative decoding, reducing OOM risk under peak load
+- **Qwen3.6 max sequences** reduced from 32 to 20 — matches lower memory budget, improves per-request latency consistency
+
+### Removed
+
+- **`--language-model-only` flag** from Qwen3.6 vLLM args — no longer needed/compatible with current vLLM version
+
 ## [1.2.0] - 2026-05-03
 
 ### Added
