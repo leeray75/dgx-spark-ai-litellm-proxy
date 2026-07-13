@@ -1,74 +1,270 @@
 # =============================================================================
-# docker-compose.qwen3.6.yml — Qwen3.6-27B-FP8 on NVIDIA DGX Spark (Blackwell GB10)
+# docker-compose.qwen3.6.yml — Qwen3.6-35B-A3B-NVFP4 on NVIDIA DGX Spark (GB10)
 #
-# Main stack configuration - Qwen3.6-27B-FP8 is the default model.
-# Includes full Langfuse/LiteLLM observability stack.
+# Main stack configuration. Includes full Langfuse/LiteLLM observability stack.
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.qwen3.6.yml up -d
-#   (Qwen3.6 is now the default; run without this file to use Coder-Next)
 #
-# Source: https://huggingface.co/Qwen/Qwen3.6-27B-FP8
+# USE CASE: serving Cline (AI coding agent) via LiteLLM, needs 250k+ token context.
+# PRIORITY: runtime coding performance (latency/throughput during use) over
+# startup/restart time — this was a deliberate earlier decision.
+#
+# SPEC-ALIGNMENT PASS (this revision): the official NVIDIA model card's exact
+# DGX-Spark-recommended command was pasted in full and diffed against this file.
+# Three flags were WRONG relative to the actual official text (not assumptions
+# from earlier in this project — the literal card text):
+#   - --gpu-memory-utilization was 0.85; official says 0.4. This is a big gap.
+#     Lower utilization means a smaller eager memory pool reservation — directly
+#     relevant to the still-unresolved swap/memory-pressure issue observed on
+#     this box (system was swapping ~7GB even at 0.85). Changed to 0.4.
+#   - --tool-call-parser was qwen3_coder; official says qwen3_xml. This is a
+#     correctness issue for Cline specifically, since Cline depends on correctly
+#     parsed tool calls (file edits, terminal commands). Changed to qwen3_xml.
+#   - --load-format fastsafetensors was missing entirely; official includes it.
+#     Added — should reduce the ~200-230s weight-loading phase measured on every
+#     restart so far.
+#
+# ⚠️ ONE FLAG WAS CHANGED THAT DIRECTLY REVERSES AN EARLIER DELIBERATE DECISION —
+# FLAGGING THIS EXPLICITLY RATHER THAN BURYING IT:
+#   --max-num-batched-tokens was deliberately set to 262144 (matching
+#   --max-model-len) specifically so large Cline contexts ingest in fewer
+#   chunked-prefill passes, at the cost of a larger autotuning search space.
+#   That was a considered tradeoff made after this exact number was tested at
+#   16384 and reverted once "prioritize coding performance" was stated explicitly.
+#   The official card's DGX-Spark command uses 8192 — a much smaller, safer
+#   general-purpose default. This revision sets it to 8192 to literally match
+#   the spec as requested. IF Cline's large-context ingestion latency regresses
+#   noticeably, that's the tradeoff reasserting itself — revert to 262144 (or
+#   something in between) and re-test. This is the one change in this pass most
+#   likely to need reverting based on actual observed Cline behavior, not
+#   something to treat as settled just because it now matches the card.
+#
+# NOT changed, and why: --quantization modelopt (present in the card's GENERIC
+# command, absent from its DGX-Spark-specific command — inconsistency in
+# NVIDIA's own docs, not something to resolve by guessing; this flag has worked
+# correctly across every successful boot so far, left as-is). Also not changed:
+# --mamba-ssm-cache-dtype float32, --max-cudagraph-capture-size 256,
+# --served-model-name, --uvicorn-log-level, --default-chat-template-kwargs,
+# --override-generation-config — none of these appear in the official command,
+# but none are contradicted by it either; they address specific behavior
+# observed on this exact hardware/architecture (e.g. vLLM's own runtime warning
+# requiring float32 mamba cache) that the card's generic example doesn't cover.
+#
+# RESTART TIME — ROOT CAUSE FOUND AND FIXED (see "first-boot init" note below):
+# with a nightly image newer than 2026-05-31, the ~60-min FlashInfer fp8_gemm
+# autotune phase runs ONCE and its results persist in the vllm-compile-cache
+# volume. Confirmed empirically: first tuned boot on 0.23.1rc1.dev1042+g8e981630c
+# took ~35 min total (vs. ~75-80 min baseline), with the autotune phase itself
+# dropping from ~70+ passes to 3 passes (~10.7 min) on that first, cache-miss
+# boot. The NEXT restart (cache-hit) is the real test of the full payoff and
+# was not yet measured as of this revision — verify and update this note.
+#
+#   TWO REMAINING LEVERS FOR RUNTIME PERFORMANCE, NOT YET APPLIED:
+#   1. RETRACTED (was: generate the missing NVIDIA_GB10 MoE kernel config via
+#      benchmark_moe.py). That recommendation was based on a wrong diagnosis —
+#      the "Using default MoE config. Performance might be sub-optimal!" warning
+#      concerns vLLM's Triton MoE kernel config, a different subsystem from the
+#      FlashInfer fp8_gemm autotuner that dominated restart time, and this
+#      stack's MoE routing runs on the Marlin backend anyway (which Triton
+#      configs don't help). A possible real runtime lever on newer nightlies:
+#      --moe-backend flashinfer_b12x, a FlashInfer CuteDSL fused-MoE backend
+#      added specifically for SM12x (RTX Pro 6000 / DGX Spark). Unverified on
+#      this model/checkpoint — benchmark against marlin before adopting.
+#   2. KV cache is capped because Postgres, ClickHouse, MinIO, and Langfuse all
+#      compete for the same GB10 unified memory pool, AND because
+#      --gpu-memory-utilization is now 0.4 instead of 0.85 (see spec-alignment
+#      note above) — expect KV cache capacity to drop further from the ~7.44 GiB
+#      / 626,866 tokens last measured at 0.85. This trades KV cache headroom for
+#      (hopefully) resolving the swap/memory-pressure issue. Verify both after
+#      the next restart: check KV cache size in the log AND `free -h` for swap.
+#      If coding performance matters more than observability during active
+#      sessions, consider a leaner compose file that runs only the vLLM engine
+#      + LiteLLM + Redis (drop Postgres/ClickHouse/MinIO/Langfuse), or stop the
+#      observability stack before long coding sessions and restart it after.
+#
+# Source: https://huggingface.co/nvidia/Qwen3.6-35B-A3B-NVFP4
 #
 # Hardware: NVIDIA DGX Spark workstation with GB10 Superchip (128 GB unified memory)
 #
-# Image:    vllm/vllm-openai:v0.19.1-cu130  (ARM64, cu130, same as Qwen3-Coder-Next)
-#           vllm>=0.19.0 is required per official docs
-# Model:    Qwen/Qwen3.6-27B-FP8
-#           27B dense Causal Language Model with Vision Encoder
-#           Hybrid GDN (Gated DeltaNet) + Gated Attention architecture
-#           Native multimodal (vision + text), 262K context natively
-#           Extensible up to 1,010,000 tokens via YaRN
+# Image:    vllm/vllm-openai:nightly (ARM64)
+#           MUST be a nightly built after 2026-05-31 for the FlashInfer autotune
+#           persistent cache (see "first-boot init" note below). After verifying a
+#           working boot, pin to the digest and record it here:
+#             docker inspect --format '{{index .RepoDigests 0}}' vllm/vllm-openai:nightly
+#           Known-BAD (for restart time): 0.22.1rc1.dev26+g4721bb3aa — persistent
+#           autotune cache hard-disabled in that build.
+#           Confirmed-GOOD (as of this revision): 0.23.1rc1.dev1042+g8e981630c —
+#           persistent autotune cache active, confirmed via log line
+#           "Using FlashInfer autotune cache file: ..." and cache-save on exit.
+#           Pinned working digest: <record here once confirmed>
 #
-# Architecture (from official model card):
-#   - Hidden Layout: 16 × (3 × (Gated DeltaNet → FFN) → 1 × (Gated Attention → FFN))
-#   - Gated DeltaNet: 48 heads for V, 16 for QK, head dim 128
-#   - Gated Attention: 24 heads for Q, 4 for KV, head dim 256
-#   - MTP: trained with multi-steps (native speculative decoding support)
-#   - Same GDN hybrid attention as Qwen3-Coder-Next — mamba-ssm-cache-dtype float32 required
+# Model:    nvidia/Qwen3.6-35B-A3B-NVFP4
+#           35B MoE (3B activated), NVFP4 quantized via NVIDIA Model Optimizer
+#           Hybrid Attention + MoE architecture, checkpoint ~21.8 GiB on disk
 #
-# Corrections vs first draft (verified against official HuggingFace model card):
+# GB10 memory budget (128GB unified — shared with CPU + every other container below):
+#   NVFP4 weights:         ~22GB
+#   Framework/CUDA:         ~4GB
+#   KV cache (fp8):        remainder, NOT a fixed ~94GB — see note below
 #
-#   1. REMOVED --quantization fp8
-#      Official vLLM examples do NOT pass --quantization for FP8 checkpoint variants.
-#      --dtype auto correctly detects pre-quantized FP8 weights. Adding --quantization fp8
-#      on a pre-quantized checkpoint can cause conflicts.
+# IMPORTANT — measured vs. planned KV cache:
+#   The original comments here assumed vLLM as the sole memory consumer. Measured
+#   values across several runs at --gpu-memory-utilization 0.85: KV cache capacity
+#   ranged ~5.99-11.79 GiB (505k-995k tokens) depending on what else was running,
+#   because Postgres, ClickHouse, Redis, MinIO, and the Langfuse/LiteLLM stack all
+#   compete for the same unified memory pool — unlike a discrete-GPU box where
+#   system RAM and VRAM are separate. Now at 0.4 (spec-alignment pass, see above),
+#   expect this to be meaningfully smaller — not yet measured as of this revision.
 #
-#   2. FIXED speculative method: "mtp" → "qwen3_next_mtp"
-#      Official docs specify: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-#      "mtp" is generic vLLM; "qwen3_next_mtp" is the model-specific correct method.
+# IMPORTANT — FP4 compute on GB10 (SM121):
+#   GB10 has native NVFP4 tensor core support at the hardware level, but vLLM's
+#   FlashInfer-based native FP4 GEMM/MoE kernels currently target Hopper/datacenter
+#   Blackwell (SM90/SM100), not SM121. In practice this means vLLM falls back to the
+#   Marlin kernel (dequant-to-BF16, weight-only) for NVFP4 on this hardware today —
+#   that's expected, not a misconfiguration. MoE routing uses --moe-backend marlin
+#   (CLI flag, safe). NVFP4 linear/GEMM routing uses the VLLM_NVFP4_GEMM_BACKEND=marlin
+#   env var below — NOT the --linear-backend flag, which is broader than the old env
+#   var and crashes this model's FP8-quantized GDN attention projection layers on
+#   GB10 (see "Corrections" note 2 below for the full story).
 #
-#   3. FIXED num_speculative_tokens: 1 → 2
-#      Official recommendation is 2 for this model.
+# CORRECTED — first-boot init slowness (~75 min), real root cause and real fix:
+#   A real run took init engine (profile, create kv cache, warmup model) = 4477.52s
+#   (~74.6 min) total, of which only ~589s was torch.compile — the rest was the
+#   FlashInfer "Tuning fp8_gemm" autotuner repeating ~70+ times.
 #
-#   4. CONFIRMED --language-model-only is official
-#      Explicitly in official vLLM serving section: "skips the vision encoder and
-#      multimodal profiling to free up memory for additional KV cache"
+#   An earlier revision of this comment blamed the missing NVIDIA_GB10 MoE config
+#   (E=256,N=512,device_name=NVIDIA_GB10.json) and prescribed benchmark_moe.py.
+#   That diagnosis was WRONG — that warning concerns vLLM's Triton MoE kernel
+#   config, a separate and much faster subsystem. The actual cause, confirmed in
+#   vLLM's source at the exact running commit (4721bb3aa):
 #
-#   5. CONFIRMED --reasoning-parser qwen3 required
-#      Model thinks by default; without this flag thinking tokens leak into output.
+#     vLLM added a persistent FlashInfer autotune cache (PR #42537, merged
+#     2026-05-19) but hard-disabled it the same day over a FlashInfer cache-
+#     collision bug (PR #43119: _FLASHINFER_USE_PERSISTENT_CACHE = False).
+#     Builds from that window — including 0.22.1rc1.dev26+g4721bb3aa — throw
+#     away all fp8_gemm tuning results on every restart, no matter what
+#     volumes are mounted. PR #44071 (2026-05-31) re-enabled the cache by
+#     default for single-GPU (TP=1, i.e. this box).
 #
-#   6. ADDED --override-generation-config per official best practices
-#      For precise coding tasks: temperature=0.6, top_p=0.95, top_k=20, min_p=0.0
+#   FIX: pull a nightly newer than 2026-05-31. The autotune cache lands at
+#   $VLLM_CACHE_ROOT/flashinfer_autotune_cache/<fi-ver>/<arch>/<config-hash>/
+#   autotune_configs.json, inside /root/.cache/vllm — already persisted by the
+#   vllm-compile-cache volume below. First boot on the new image re-tunes once
+#   (~60 min worst case; measured ~10.7 min on this exact box) and saves; later
+#   boots load the JSON and skip re-profiling.
+#   Verify on first boot:  log line "Using FlashInfer autotune cache file: ..."
+#   Verify on second boot: cache-load message, and no hour-long fp8_gemm phase.
+#   CAVEATS:
+#     - The cache key hashes the engine config: changing --max-num-batched-tokens,
+#       --max-model-len, --gpu-memory-utilization, the image version, etc.
+#       triggers ONE full re-tune. This revision changes THREE flags relative to
+#       the last successful boot (gpu-memory-utilization, max-num-batched-tokens,
+#       tool-call-parser, load-format) — expect the NEXT boot to re-tune once
+#       (new cache-key hash), not load an existing cache-hit.
+#     - If output looks wrong after a cache load, set
+#       VLLM_DISABLE_FLASHINFER_AUTOTUNE_CACHE=1 (escape hatch for the collision
+#       bug that caused the temporary disable) and report upstream.
+#   The commented-out --enforce-eager variant of the command below remains a
+#   diagnostic tool only — it trades away CUDA-graph inference speed.
 #
-# Sampling parameters (official best practices):
-#   Coding tasks:   temperature=0.6, top_p=0.95, top_k=20, min_p=0.0
-#   General tasks:  temperature=1.0, top_p=0.95, top_k=20, min_p=0.0
-#   Non-thinking:   temperature=0.7, top_p=0.80, top_k=20, presence_penalty=1.5
-#
-# Memory on GB10 (128GB unified):
-#   Model weights (FP8):  ~27GB
-#   KV cache (fp8, 0.85): ~80GB
-#   Framework overhead:   ~4GB
-#   Total:                ~111GB
-#
-# NOTE: Cannot run simultaneously with Qwen3-Coder-Next at gpu-memory-utilization 0.92
-#       (~118GB). Stop Coder-Next first, or split budget between both engines.
+# Corrections history (current state reflects the end of this list, not each step):
+#   1. VLLM_USE_FLASHINFER_MOE_FP4 and VLLM_FP8_MOE_BACKEND were removed, then
+#      RESTORED after reviewing NVIDIA's official model card — they're part of
+#      NVIDIA's documented DGX Spark launch command and this checkpoint genuinely
+#      has FP8-quantized layers (mixed BF16/F8_E4M3/U8 per the model card).
+#   2. --linear-backend marlin was tried as a replacement for the deprecated
+#      VLLM_NVFP4_GEMM_BACKEND=marlin env var and crashed startup: this model's GDN
+#      attention projection layers are FP8-quantized, and --linear-backend marlin
+#      routes FP8 kernel selection down a path needing the undocumented, test-only
+#      VLLM_TEST_FORCE_FP8_MARLIN=1 on GB10 ("Failed to find a kernel that can
+#      implement the ScaledMM linear layer"). Reverted — VLLM_NVFP4_GEMM_BACKEND
+#      is kept as an env var (harmless FutureWarning) until a real fix is confirmed.
+#   3. --max-num-batched-tokens and --max-cudagraph-capture-size were temporarily
+#      lowered (16384 / 128) to cut restart time, then reverted back to 262144 / 256
+#      once priority shifted to runtime coding performance over startup time.
+#      SUPERSEDED by item 10 below — max-num-batched-tokens is now 8192 again,
+#      this time to match the official spec text exactly. See the ⚠️ flag near
+#      the top of this file — this may still need reverting based on real Cline
+#      latency behavior, unrelated to restart time this time.
+#   4. Fixed litellm's dependency on the vLLM engine from service_started to
+#      service_healthy. With a 3600s healthcheck start_period and multi-minute
+#      compile/autotune phases, LiteLLM was previously able to start forwarding
+#      requests to vLLM long before it was actually serving.
+#   5. Added a named volume for /root/.cache/vllm so the torch.compile cache survives
+#      container recreation (docker compose down/up, image updates) — previously only
+#      the Hugging Face cache was persisted, so any full recreation paid the ~585s
+#      torch.compile reload (or a much longer real compile) from scratch every time.
+#   6. speculative-config method/num_speculative_tokens left as "mtp"/3 — this
+#      matches the official DGX-Spark command exactly, confirmed directly (not
+#      inferred from a different model's card as an earlier note here worried).
+#   7. --gpu-memory-utilization lowered from 0.90 to 0.85 after observing the whole
+#      DGX Spark using 120+ GB of its 128 GB unified pool at that setting.
+#      SUPERSEDED by item 10 below — now 0.4, matching the official spec exactly
+#      (this earlier 0.85 was believed to match the spec but did not; the actual
+#      official text was not checked directly until item 10).
+#   8. Observability stack memory audit — found ClickHouse's memory ratio was
+#      effectively ~38GB instead of a real cap, fixed it, added hard Docker memory
+#      limits across the whole observability stack (postgres 768M, clickhouse 3G,
+#      redis 640M, minio 512M, langfuse-worker 768M, langfuse-web 768M, litellm 1G)
+#      — none of these had any ceiling before. Also fixed Redis: had noeviction
+#      policy but NO --maxmemory ceiling at all (genuinely unbounded); added
+#      --maxmemory 512mb. This fix did NOT turn out to be the actual cause of the
+#      120GB+ swap-inducing memory pressure (see item 9's context) but is real,
+#      independently-justified hygiene, kept regardless.
+#   9. Root cause of the 120GB+/swap memory pressure was investigated in depth
+#      (docker stats, free -h, ps aux, ipcs -m, /proc/meminfo) and attributed to
+#      vLLM's own eager memory-pool reservation at gpu_memory_utilization=0.85
+#      (0.85 × 121.7GB ≈ 103GB), confirmed later via vLLM's own runtime log:
+#      "Actual usage is 21.97 GiB for weight, 40.79 GiB for peak activation,
+#      36.95 GiB for non-torch memory, and 1.15 GiB for CUDAGraph memory" (~101GB).
+#      Swap (~7GB) was STILL present at 0.85 as of the last check — NOT resolved
+#      by the item 8 observability fixes. Item 10's drop to 0.4 (official spec
+#      value) is the first change with a real chance of resolving this — verify
+#      swap usage specifically after the next restart, don't assume it's fixed.
+#  10. RESTART TIME root cause corrected (replaces the benchmark_moe.py plan):
+#      the ~60-min fp8_gemm phase repeated every boot because the running nightly
+#      (0.22.1rc1.dev26+g4721bb3aa) hard-disables vLLM's persistent FlashInfer
+#      autotune cache. Fix = newer nightly (>2026-05-31, PR #44071) — see the
+#      "first-boot init" note above. Confirmed working empirically. Also added
+#      vllm-flashinfer-cache volume for /root/.cache/flashinfer so FlashInfer's
+#      JIT-compiled kernels survive container recreation (same class of fix as
+#      the torch.compile volume).
+#  11. SPEC-ALIGNMENT PASS: the official NVIDIA model card's exact DGX-Spark
+#      command text was obtained directly (not paraphrased/assumed) and diffed
+#      against this file. Found and fixed three real discrepancies:
+#      --gpu-memory-utilization 0.85→0.4, --tool-call-parser qwen3_coder→
+#      qwen3_xml, added --load-format fastsafetensors (was missing entirely).
+#      Also changed --max-num-batched-tokens 262144→8192 to match spec exactly —
+#      flagged prominently near the top of this file since it reverses an
+#      earlier deliberate Cline-performance decision and may need reverting
+#      based on real observed latency, not restart time this time.
+#      RESULT (confirmed): restart time dropped to ~10 min (torch.compile range
+#      and autotuner shape space both shrank along with max-num-batched-tokens),
+#      KV cache capacity IMPROVED (9.95 GiB / 839,620 tokens / 3.20x concurrency,
+#      up from 7.44 GiB at the old 0.85/262144 combo — freed activation memory
+#      outweighed the lower utilization %), and swap dropped from ~7GB to ~1.6GB
+#      idle. Net win on every measured axis. Real-traffic verification still
+#      recommended for sustained-session latency, but no regression seen yet.
+#  12. langfuse-web crashed in a restart loop under real Cline traffic the first
+#      time real requests flowed through LiteLLM with tracing enabled ("FATAL
+#      ERROR: Reached heap limit ... JavaScript heap out of memory"). The 768M
+#      memory limit from the item-8 audit was based on IDLE docker stats
+#      (~474MB) and never load-tested — V8 doesn't reliably respect a Docker
+#      cgroup memory limit on its own, so it grew past 768M and got hard-killed
+#      rather than staying under it. Fixed: raised to 1.5G AND added
+#      NODE_OPTIONS=--max-old-space-size=1024 to explicitly cap V8's heap below
+#      the container ceiling (leaving ~500MB for non-heap overhead). Applied
+#      the same fix preemptively to langfuse-worker (also Node.js, same risk,
+#      hadn't crashed yet but shares the exact same failure mode). Lesson for
+#      any future memory-limit tuning in this file: idle docker stats readings
+#      are not a substitute for testing under real load before trusting a limit.
 #
 # External ports (reachable from other machines):
 #   3000  — Langfuse UI + API
 #   4000  — LiteLLM Proxy (OpenAI-compatible) + UI at /ui
 #   8301  — vLLM engine (direct; prefer routing via LiteLLM on 4000)
+#   8302  — vLLM embedding engine (nvidia/llama-nemotron-embed-vl-1b-v2, direct)
 #   9090  — MinIO S3 API
 #   9091  — MinIO console UI
 #
@@ -86,7 +282,6 @@ services:
   # PostgreSQL — shared instance; two isolated databases:
   #   "postgres" for Langfuse, "litellm" for LiteLLM
   # TZ=UTC / PGTZ=UTC required — non-UTC causes incorrect Langfuse query results
-  # Tuned: shared_buffers, work_mem, WAL compression, checkpoint settings
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
@@ -103,15 +298,18 @@ services:
       PGTZ: UTC
     command: >
       postgres
-      -c shared_buffers=512MB
-      -c effective_cache_size=1GB
-      -c work_mem=16MB
-      -c maintenance_work_mem=128MB
+      -c shared_buffers=256MB
+      -c effective_cache_size=512MB
+      -c work_mem=8MB
+      -c maintenance_work_mem=64MB
       -c checkpoint_completion_target=0.9
       -c wal_compression=on
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     volumes:
       - langfuse-postgres-data:/var/lib/postgresql/data
-      # Creates the "litellm" database on first start so LiteLLM has its own schema
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
@@ -122,8 +320,6 @@ services:
 
   # ---------------------------------------------------------------------------
   # ClickHouse — OLAP store for Langfuse traces, observations, and scores
-  # Single-node with built-in Keeper (no external ZooKeeper needed)
-  # Memory capped to prevent greedy RAM usage alongside vLLM
   # ---------------------------------------------------------------------------
   clickhouse:
     image: clickhouse/clickhouse-server:latest
@@ -131,17 +327,26 @@ services:
     networks:
       - ai-bridge
     ports:
-      - "127.0.0.1:8123:8123"   # HTTP interface (used by Langfuse web + worker)
-      - "127.0.0.1:9000:9000"   # Native protocol (used for schema migrations)
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
     volumes:
       - langfuse-clickhouse-data:/var/lib/clickhouse
       - langfuse-clickhouse-logs:/var/log/clickhouse-server
       - ./clickhouse-config.xml:/etc/clickhouse-server/config.d/langfuse.xml:ro
     environment:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}       # set in .env
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-default}
-      CLICKHOUSE_MAX_SERVER_MEMORY_USAGE_TO_RAM_RATIO: "0.3"   # cap CH memory; prevents competing with vLLM
+      CLICKHOUSE_MAX_SERVER_MEMORY_USAGE_TO_RAM_RATIO: "0.02"
+      # FIXED: was "0.3", intended as "cap CH memory; prevents competing with vLLM"
+      # but 0.3 of GB10's 128GB unified pool is ~38GB — nowhere near a cap on this
+      # hardware. Turned out NOT to be the actual cause of the swap/memory-pressure
+      # issue (see Corrections item 9), but fixed anyway as real hygiene. The hard
+      # Docker memory limit below is the real enforcement mechanism.
+    deploy:
+      resources:
+        limits:
+          memory: 3G
     healthcheck:
       test: ["CMD", "clickhouse-client",
              "--user", "${CLICKHOUSE_USER:-clickhouse}",
@@ -153,10 +358,7 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Redis — Langfuse event queue + API-key / prompt cache
-  #         LiteLLM exact-match prompt cache (new)
-  # maxmemory-policy noeviction is REQUIRED — prevents queue job eviction
-  # RDB snapshots and AOF disabled — pure queue/cache workload, no persistence needed
+  # Redis — Langfuse event queue + API-key / prompt cache, LiteLLM prompt cache
   # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
@@ -165,11 +367,21 @@ services:
       - ai-bridge
     ports:
       - "127.0.0.1:6379:6379"
+    # FIXED: previously had noeviction policy but NO --maxmemory set at all —
+    # meaning it had no ceiling and could grow unbounded. noeviction without a
+    # cap isn't a safety setting, it's the opposite: it guarantees Redis will
+    # never free memory under pressure. 512mb is generous for an exact-match
+    # prompt cache + Langfuse's event queue at this scale.
     command: >
       --requirepass ${REDIS_AUTH}
+      --maxmemory 512mb
       --maxmemory-policy noeviction
       --save ""
       --appendonly no
+    deploy:
+      resources:
+        limits:
+          memory: 640M
     volumes:
       - langfuse-redis-data:/data
     healthcheck:
@@ -188,12 +400,16 @@ services:
     networks:
       - ai-bridge
     ports:
-      - "9090:9000"    # S3 API
-      - "9091:9001"    # MinIO console UI
+      - "9090:9000"
+      - "9091:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}       # set in .env
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     command: server /data --console-address ":9001"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     volumes:
       - langfuse-minio-data:/data
     healthcheck:
@@ -224,7 +440,6 @@ services:
 
   # ---------------------------------------------------------------------------
   # Langfuse Worker — async event processor (REQUIRED in v3)
-  # Reads events from Redis queue → writes to ClickHouse + S3/MinIO
   # ---------------------------------------------------------------------------
   langfuse-worker:
     image: langfuse/langfuse-worker:3
@@ -245,21 +460,16 @@ services:
     environment: &langfuse-env
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-postgres}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}               # set in .env
-      SALT: ${LANGFUSE_SALT}                            # set in .env
-      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}        # openssl rand -hex 32
-
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
       TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
-
-      # ClickHouse — plain base URL; credentials via separate vars
       CLICKHOUSE_MIGRATION_URL: clickhouse://${CLICKHOUSE_USER:-clickhouse}:${CLICKHOUSE_PASSWORD}@clickhouse:9000/${CLICKHOUSE_DATABASE:-default}
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       CLICKHOUSE_CLUSTER_ENABLED: "false"
-
-      # S3 / MinIO — event uploads
       LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
       LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
       LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
@@ -267,8 +477,6 @@ services:
       LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
       LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
       LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
-
-      # S3 / MinIO — media uploads
       LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
       LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
       LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
@@ -277,8 +485,6 @@ services:
       LANGFUSE_S3_MEDIA_UPLOAD_EXTERNAL_ENDPOINT: http://localhost:9090
       LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
       LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
-
-      # S3 / MinIO — batch exports (disabled by default)
       LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
       LANGFUSE_S3_BATCH_EXPORT_BUCKET: langfuse
       LANGFUSE_S3_BATCH_EXPORT_PREFIX: exports/
@@ -288,11 +494,18 @@ services:
       LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
       LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: "true"
-
-      # Redis
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_AUTH: ${REDIS_AUTH}
+      # PREEMPTIVE: same fix applied to langfuse-web after it crashed under real
+      # load (see that service's comment) — langfuse-worker is also Node.js and
+      # shares the same risk (V8 heap not reliably respecting the Docker cgroup
+      # limit). Applying the bound before it crashes rather than after.
+      NODE_OPTIONS: "--max-old-space-size=1024"
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -317,35 +530,76 @@ services:
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
       LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+      # FIXED: langfuse-web crashed in a restart loop under real Cline traffic
+      # ("FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap
+      # out of memory"). The 768M Docker memory limit below was set during an
+      # earlier memory audit based on IDLE docker stats (~474MB at rest) — never
+      # load-tested. Under real trace-ingestion load it wasn't enough, and V8's
+      # default heap sizing doesn't reliably respect a Docker cgroup limit, so it
+      # grew past 768M and got hard-killed instead of gracefully staying under it.
+      # Fix: raised the container limit to 1.5G AND explicitly capped V8's heap
+      # at 1024MB via NODE_OPTIONS, leaving ~500MB headroom in the container for
+      # non-heap overhead (native modules, buffers, Prisma's query engine
+      # process). If this recurs, raise both numbers together, not just the
+      # container limit alone — an unbounded V8 heap will just grow to fill
+      # whatever ceiling you give it.
+      NODE_OPTIONS: "--max-old-space-size=1024"
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # vLLM Engine — Qwen3.6-27B-FP8 (DEFAULT MODEL)
-  # ARM64 / GB10 Superchip, 128 GB unified memory
-  #
-  # Performance tuning (vs original):
-  #   gpu-memory-utilization 0.88→0.92   GB10 unified memory stable higher
-  #   max-num-seqs          16→32        KV cache was only ~2% used; huge headroom
-  #   max-num-batched-tokens 16384→32768 matches the increased seq capacity
-  #   scheduler-delay-factor 0.3         batches more decode steps → higher gen t/s
-  #   uvicorn-log-level warning          cuts log noise, marginal CPU savings
-  #   shm_size 16gb                      prevents IPC issues under concurrent load
-  #   ulimits memlock/stack              standard for GPU inference workloads
+  # vLLM Engine — nvidia/Qwen3.6-35B-A3B-NVFP4
+  # NVIDIA DGX Spark — GB10 Superchip (128GB unified memory)
   # ---------------------------------------------------------------------------
-  qwen3-6-27b-engine:
-    image: vllm/vllm-openai:v0.19.1-cu130
+  qwen3-6-35b-nvfp4-engine:
+    image: vllm/vllm-openai:nightly
     platform: linux/arm64
-    container_name: qwen3-6-27b-engine
+    container_name: qwen3-6-35b-nvfp4-engine
     networks:
       - ai-bridge
     ports:
       - "8301:8000"
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
+      # Persists torch.compile graph cache AND (nightly > 2026-05-31) the
+      # FlashInfer autotune config cache across container recreation — this is
+      # what turns the ~60-min fp8_gemm autotune into a one-time cost.
+      - vllm-compile-cache:/root/.cache/vllm
+      # Persists FlashInfer's JIT workspace (compiled kernel artifacts) —
+      # distinct from the autotune configs above. Verify the path inside the
+      # running container with:
+      #   docker exec qwen3-6-35b-nvfp4-engine python3 -c \
+      #     "from flashinfer.jit import env; print(env.FLASHINFER_WORKSPACE_DIR)"
+      # and adjust this mount if it prints something other than
+      # /root/.cache/flashinfer.
+      - vllm-flashinfer-cache:/root/.cache/flashinfer
+      - vllm-triton-cache:/root/.triton
     environment:
       HF_TOKEN: ${HF_TOKEN}
+      FLASHINFER_DISABLE_VERSION_CHECK: "1"
+      CUTE_DSL_ARCH: sm_121a                # GB10 Blackwell SM architecture, confirmed correct
       VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+      # RESTORED (correction): these two were previously removed as "dead config"
+      # under the assumption this is a pure NVFP4 checkpoint. That was wrong — the
+      # official model card confirms mixed-precision weights (BF16 · F8_E4M3 · U8
+      # tensor types) and explicitly recommends BOTH of these for DGX Spark.
+      # Deprecation warnings from vLLM here are cosmetic; NVIDIA's own docs still
+      # specify them, and on some builds they've been observed as silent no-ops
+      # ("Unknown vLLM environment variable") — kept anyway per official guidance.
+      VLLM_USE_FLASHINFER_MOE_FP4: "0"
+      VLLM_FP8_MOE_BACKEND: flashinfer_cutlass
+      # KEPT (not part of NVIDIA's documented command, but empirically required):
+      # removing this in favor of --linear-backend marlin crashed startup — see
+      # Corrections note 2. NVIDIA's own launch command doesn't set this at all;
+      # kept because it's proven to work, not because it's official.
       VLLM_NVFP4_GEMM_BACKEND: marlin
+      # ESCAPE HATCH (leave commented): if generation output looks wrong after a
+      # FlashInfer autotune cache load on a newer nightly, uncomment to disable
+      # the persistent cache (reverts to re-tuning every boot) and report upstream.
+      # VLLM_DISABLE_FLASHINFER_AUTOTUNE_CACHE: "1"
     deploy:
       resources:
         reservations:
@@ -367,50 +621,125 @@ services:
       interval: 15s
       timeout: 10s
       retries: 120
-      start_period: 600s
+      start_period: 3600s
     command: >
-      Qwen/Qwen3.6-27B-FP8
-      --served-model-name qwen3.6-27b
+      nvidia/Qwen3.6-35B-A3B-NVFP4
+      --served-model-name qwen3.6-35b-a3b
       --host 0.0.0.0
       --port 8000
       --dtype auto
+      --quantization modelopt
       --kv-cache-dtype fp8
       --tensor-parallel-size 1
-      --gpu-memory-utilization 0.60
+      --gpu-memory-utilization 0.4
       --max-model-len 262144
-      --max-num-seqs 20
+      --max-num-seqs 4
       --enable-chunked-prefill
-      --max-num-batched-tokens 32768
+      --async-scheduling
+      --max-num-batched-tokens 8192
+      --load-format fastsafetensors
       --mamba-ssm-cache-dtype float32
-      --max-cudagraph-capture-size 128
+      --max-cudagraph-capture-size 256
       --attention-backend flashinfer
+      --moe-backend marlin
       --uvicorn-log-level warning
       --trust-remote-code
       --enable-auto-tool-choice
-      --tool-call-parser qwen3_coder
+      --tool-call-parser qwen3_xml
       --reasoning-parser qwen3
       --enable-prefix-caching
-      --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+      --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'
       --default-chat-template-kwargs '{"preserve_thinking":true}'
       --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
+    # ---------------------------------------------------------------------------
+    # DEBUG VARIANT — if the run hangs in FlashInfer autotuning again, comment out
+    # the `command:` block above and uncomment this one. It drops CUDA graph
+    # capture entirely, which should isolate whether graph-shape enumeration is
+    # driving the repeated autotuning passes. Expect a much faster (but somewhat
+    # slower at *inference* time) boot.
+    # ---------------------------------------------------------------------------
+    # command: >
+    #   nvidia/Qwen3.6-35B-A3B-NVFP4
+    #   --served-model-name qwen3.6-35b-a3b
+    #   --host 0.0.0.0
+    #   --port 8000
+    #   --dtype auto
+    #   --quantization modelopt
+    #   --kv-cache-dtype fp8
+    #   --tensor-parallel-size 1
+    #   --gpu-memory-utilization 0.4
+    #   --max-model-len 262144
+    #   --max-num-seqs 4
+    #   --enable-chunked-prefill
+    #   --async-scheduling
+    #   --max-num-batched-tokens 8192
+    #   --load-format fastsafetensors
+    #   --mamba-ssm-cache-dtype float32
+    #   --enforce-eager
+    #   --attention-backend flashinfer
+    #   --moe-backend marlin
+    #   --uvicorn-log-level warning
+    #   --trust-remote-code
+    #   --enable-auto-tool-choice
+    #   --tool-call-parser qwen3_xml
+    #   --reasoning-parser qwen3
+    #   --enable-prefix-caching
+    #   --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'
+    #   --default-chat-template-kwargs '{"preserve_thinking":true}'
+    #   --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # vLLM Embedding Engine — nvidia/llama-nemotron-embed-vl-1b-v2
+  # Multimodal (text/image/image+text) embedding model, ~1.7B params (Llama 3.2
+  # 1B LM + SigLip2 400M vision encoder), 2048-dim output. Small enough to run
+  # alongside the 35B chat engine on the same GB10 — unlike the three main chat
+  # models, it does NOT need exclusive GPU access.
+  # Source: https://huggingface.co/nvidia/llama-nemotron-embed-vl-1b-v2
+  # Requires vLLM >=0.17.0 (registers the LlamaNemotronVLModel architecture);
+  # the :nightly image already in use here satisfies that.
+  # --max-model-len 10240 covers the model's largest supported modality
+  # (image+text); --trust-remote-code is required per the model card.
+  # ---------------------------------------------------------------------------
+  nemotron-embed-vl-engine:
+    image: vllm/vllm-openai:nightly
+    platform: linux/arm64
+    container_name: nemotron-embed-vl-engine
+    networks:
+      - ai-bridge
+    ports:
+      - "8302:8000"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - vllm-embed-compile-cache:/root/.cache/vllm
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ipc: host
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 900s
+    command: >
+      nvidia/llama-nemotron-embed-vl-1b-v2
+      --served-model-name llama-nemotron-embed-vl-1b-v2
+      --host 0.0.0.0
+      --port 8000
+      --trust-remote-code
+      --max-model-len 10240
+      --gpu-memory-utilization 0.1
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # LiteLLM Proxy — unified OpenAI-compatible API + Langfuse OTEL tracing
-  #
-  # DATABASE_URL points to the "litellm" database on the shared Postgres instance
-  # (separate from the "postgres" database used by Langfuse). This enables:
-  #   - Virtual key management  (/key/generate, /key/delete)
-  #   - Spend tracking per key/team/user
-  #   - LiteLLM UI at http://<host>:4000/ui  (login with master key)
-  #   - Budget alerts and rate-limit enforcement
-  #
-  # Without DATABASE_URL, master_key still authenticates requests but all of
-  # the above features are unavailable and nothing persists across restarts.
-  #
-  # Redis cache (new): serves exact-match repeated prompts without hitting vLLM.
-  # Pairs well with the 75-81% prefix cache hit rate seen in vLLM logs — prompts
-  # that are 100% identical are short-circuited before they even reach the engine.
   # ---------------------------------------------------------------------------
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
@@ -422,20 +751,15 @@ services:
     volumes:
       - ./litellm-config.yaml:/app/config.yaml:ro
     environment:
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}         # set in .env — must start with sk-
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       LITELLM_DROP_PARAMS: ${LITELLM_DROP_PARAMS:-true}
       LITELLM_MODIFY_PARAMS: ${LITELLM_MODIFY_PARAMS:-true}
-      # LiteLLM's own Postgres DB (separate schema from Langfuse)
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/litellm
-      # Encrypt virtual key data at rest — set once, never change after first key is created
-      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}             # set in .env — openssl rand -hex 32
-      # Langfuse OTEL — consumed by langfuse_otel callback in litellm_config.yaml
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
-      # Container-to-container: use service name, not Tailscale hostname
       LANGFUSE_OTEL_HOST: http://langfuse:3000
-      LANGFUSE_HOST: ${LANGFUSE_HOST}                   # External URL — set in .env
-      # Redis exact-match prompt cache — short-circuits vLLM for identical requests
+      LANGFUSE_HOST: ${LANGFUSE_HOST}
       LITELLM_CACHE: "true"
       LITELLM_CACHE_TYPE: "redis"
       REDIS_HOST: redis
@@ -444,13 +768,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      qwen3-6-27b-engine:
+      qwen3-6-35b-nvfp4-engine:
+        condition: service_healthy
+      nemotron-embed-vl-engine:
         condition: service_healthy
       langfuse-web:
         condition: service_started
       redis:
         condition: service_healthy
     command: ["--config", "/app/config.yaml", "--port", "4000", "--drop_params"]
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     restart: always
 
 # =============================================================================
@@ -469,3 +799,6 @@ volumes:
   langfuse-clickhouse-logs:
   langfuse-minio-data:
   langfuse-redis-data:
+  vllm-compile-cache:      # persists /root/.cache/vllm (torch.compile + FlashInfer autotune configs)
+  vllm-flashinfer-cache:   # persists /root/.cache/flashinfer (FlashInfer JIT kernel workspace)
+  vllm-embed-compile-cache: # persists /root/.cache/vllm for the embedding engine (separate model/config hash)

@@ -13,16 +13,25 @@
 
 **Solution**:
 
-The initial model loading can take 10-15 minutes. Increase the health check timeout:
+The initial model loading can take 10-60 minutes (Qwen3.6 first boot includes FlashInfer fp8_gemm autotuning). Subsequent starts are typically 5-15 minutes due to persistent cache in the `vllm-compile-cache` volume.
 
 ```bash
 # Check container logs
+docker compose logs -f qwen3-6-35b-nvfp4-engine
+docker compose logs -f nemotron-embed-vl-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine
 
 # Wait for loading to complete
-# The health check has a 600s start_period to allow for model loading
+# The health check has a 3600s start_period for Qwen3.6 (chat engine)
+# and 900s start_period for the embedding engine
 ```
+
+**If loading fails**:
+1. Check GPU memory: `nvidia-smi`
+2. Verify HF_TOKEN is correct in `.env`
+3. Ensure enough disk space for model cache
+4. Check FlashInfer autotune cache: `docker compose logs qwen3-6-35b-nvfp4-engine | grep -i flashinfer`
 
 **If loading fails**:
 1. Check GPU memory: `nvidia-smi`
@@ -54,7 +63,9 @@ docker compose logs litellm
 
 3. Verify the vLLM engine is healthy:
 ```bash
-curl http://localhost:8300/health  # For Qwen
+curl http://localhost:8301/health  # For Qwen3.6-35B
+curl http://localhost:8302/health  # For Embedding Engine (Qwen3.6 stack)
+curl http://localhost:8300/health  # For Qwen3-Coder
 curl http://localhost:8200/health  # For Nemotron
 ```
 
@@ -221,7 +232,44 @@ docker compose down
 
 ---
 
-### 8. Langfuse Events Not Showing
+### 7a. FlashInfer Autotune Hangs on First Boot
+
+**Problem**: vLLM engine stuck in "Tuning fp8_gemm" phase for over an hour on first boot.
+
+**Symptoms**:
+- Logs show repeated "Tuning fp8_gemm" entries
+- Boot takes 60+ minutes instead of 5-15 minutes
+- No cache-load message in logs
+
+**Solution**:
+
+1. Verify you're using a nightly image built after 2026-05-31:
+```bash
+docker inspect --format '{{.Config.Image}}' qwen3-6-35b-nvfp4-engine
+```
+
+2. Check for cache-load message:
+```bash
+docker compose logs qwen3-6-35b-nvfp4-engine | grep -i "flashinfer.*cache"
+```
+
+3. If cache is disabled, force re-tune and escape hatch:
+```bash
+# Clear the cache volume to force fresh autotuning
+docker volume rm ai-litellm-proxy_vllm-compile-cache
+docker compose up -d qwen3-6-35b-nvfp4-engine
+```
+
+4. If output looks wrong after cache load, disable persistent cache:
+```bash
+# Add to vLLM environment:
+VLLM_DISABLE_FLASHINFER_AUTOTUNE_CACHE=1
+```
+
+---
+
+### 7b. Langfuse Events Not Showing
+### 7b. Langfuse Events Not Showing
 
 **Problem**: API requests are tracked but traces don't appear in UI.
 
@@ -265,6 +313,8 @@ grep LANGFUSE_SECRET_KEY .env
 docker compose logs -f
 
 # Specific service
+docker compose logs -f qwen3-6-35b-nvfp4-engine
+docker compose logs -f nemotron-embed-vl-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine
 docker compose logs -f litellm
@@ -288,12 +338,15 @@ docker compose exec redis redis-cli -a <REDIS_AUTH> LOG GET
 docker compose ps -a
 
 # Check network connectivity
+docker compose exec litellm ping -c 3 qwen3-6-35b-nvfp4-engine
+docker compose exec litellm ping -c 3 nemotron-embed-vl-engine
 docker compose exec litellm ping -c 3 qwen3-coder-next-engine
 docker compose exec litellm ping -c 3 langfuse
 
 # Inspect container details
 docker compose inspect litellm
-docker compose inspect qwen3-coder-next-engine
+docker compose inspect qwen3-6-35b-nvfp4-engine
+docker compose inspect nemotron-embed-vl-engine
 
 # Execute commands in container
 docker compose exec litellm cat /app/config.yaml

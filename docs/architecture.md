@@ -29,24 +29,24 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 │                    ┌─────────────────────────┼─────────────────────────────┐
 │                    │                         │                             │
 │          ┌─────────▼─────────┐   ┌───────────▼────────────┐               │
-│          │  Langfuse Worker  │   │   Qwen3 Engine         │               │
+│          │  Langfuse Worker  │   │   Qwen3.6 Engine       │               │
 │          │  (Async Events)   │   │   (vLLM, 8301)         │               │
-│          └─────────┬─────────┘   └────────────────────────┘               │
-│                    │                                                      │
-│          ┌─────────▼─────────┐   ┌────────────────────────┐               │
-│          │  Langfuse Web     │   │   Qwen3-Coder Engine   │               │
-│          │  (Observability)  │   │   (vLLM, 8300)         │               │
+│          └─────────┬─────────┘   └───────────┬────────────┘               │
+│                    │                         │                             │
+│          ┌─────────▼─────────┐   ┌───────────▼────────────┐               │
+│          │  Langfuse Web     │   │   Embedding Engine     │               │
+│          │  (Observability)  │   │   (vLLM, 8302)         │               │
 │          └─────────┬─────────┘   └────────────────────────┘               │
 │                    │             ┌────────────────────────┐               │
-│          ┌─────────▼─────────┐   │   Nemotron Engine      │               │
-│          │  PostgreSQL       │   │   (vLLM, 8200)         │               │
+│          ┌─────────▼─────────┐   │   Qwen3-Coder Engine   │               │
+│          │  PostgreSQL       │   │   (vLLM, 8300)         │               │
 │          │  (Langfuse +      │   └────────────────────────┘               │
 │          │   LiteLLM DBs)    │                                            │
 │          └─────────┬─────────┘                                            │
 │                    │                                                      │
 │          ┌─────────▼─────────┐   ┌────────────────────────┐               │
-│          │  ClickHouse       │   │   Qdrant (optional)    │               │
-│          │  (Analytics)      │   │   (Vector DB)          │               │
+│          │  ClickHouse       │   │   Nemotron Engine      │               │
+│          │  (Analytics)      │   │   (vLLM, 8200)         │               │
 │          └─────────┬─────────┘   └────────────────────────┘               │
 │                    │                                                      │
 │          ┌─────────▼─────────┐   ┌────────────────────────┐               │
@@ -74,9 +74,10 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 
 | Service | Image | Port | Model | Quantization |
 |---------|-------|------|-------|--------------|
-| Qwen3 Engine | `vllm/vllm-openai:v0.19.1-cu130` | 8301 | Qwen3.6-27B-FP8 | FP8 |
-| Qwen3-Coder Engine | `vllm/vllm-openai:v0.19.1-cu130` | 8300 | Qwen3-Coder-Next-FP8 | FP8 |
-| Nemotron Engine | `vllm/vllm-openai:v0.18.1-cu130` | 8200 | Nemotron-3-Super-120B | NVFP4 |
+| Qwen3.6 Engine | `vllm/vllm-openai:nightly` | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 |
+| Embedding Engine | `vllm/vllm-openai:nightly` | 8302 | llama-nemotron-embed-vl-1b-v2 | N/A |
+| Qwen3-Coder Engine | `vllm/vllm-openai:nightly` | 8300 | Qwen3-Coder-Next-FP8 | FP8 |
+| Nemotron Engine | `vllm/vllm-openai:nightly` | 8200 | Nemotron-3-Super-120B | NVFP4 |
 
 ### Proxy Layer
 
@@ -100,7 +101,8 @@ All services connect via a Docker bridge network called `ai-bridge`:
 |------|---------|---------------|---------|
 | 3000 | Langfuse Web | External | Web UI, API |
 | 4000 | LiteLLM | External | OpenAI-compatible API |
-| 8301 | Qwen3 Engine | External | Direct vLLM access (Qwen3.6) |
+| 8301 | Qwen3.6 Engine | External | Direct vLLM access (Qwen3.6-35B) |
+| 8302 | Embedding Engine | External | Direct vLLM access (embeddings) |
 | 8300 | Qwen3-Coder Engine | External | Direct vLLM access (Qwen3-Coder) |
 | 8200 | Nemotron Engine | External | Direct vLLM access |
 | 9090 | MinIO S3 API | External | Blob storage API |
@@ -123,16 +125,25 @@ All services connect via a Docker bridge network called `ai-bridge`:
 
 ## Model Details
 
-### Qwen3.6-27B-FP8 (DEFAULT)
+### Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
 
-- **Size**: 27B total parameters (dense)
-- **Architecture**: Gated DeltaNet (GDN) + Gated Attention
-- **Quantization**: FP8
-- **Context**: 262K tokens
-- **GPU Memory**: ~111GB required
-- **Vision Support**: Native multimodal (vision + text)
+- **Size**: 35B total parameters, 3B active (MoE)
+- **Architecture**: Hybrid Attention + MoE
+- **Quantization**: NVFP4 (NVIDIA 4-bit)
+- **Context**: 262K tokens (131K default in LiteLLM)
+- **GPU Memory**: ~26GB weights (plus KV cache)
+- **Vision Support**: No (text-only)
 - **Reasoning**: Native thinking tokens with `--reasoning-parser qwen3`
-- **Special**: MTP (Multi-step Predictive Training) support
+- **Special**: `--tool-call-parser qwen3_xml`, `--load-format fastsafetensors`
+
+### llama-nemotron-embed-vl-1b-v2 (Embedding)
+
+- **Size**: ~1.7B parameters (Llama 3.2 1B LM + SigLip2 400M vision encoder)
+- **Output**: 2048-dimensional vectors
+- **Context**: 10240 tokens (image+text combined)
+- **GPU Memory**: ~4-6GB
+- **Vision Support**: Yes (multimodal embedder)
+- **Concurrent**: Runs alongside chat engine on same GPU
 
 ### Qwen3-Coder-Next-FP8
 
@@ -161,4 +172,7 @@ All services connect via a Docker bridge network called `ai-bridge`:
 | `langfuse-clickhouse-logs` | ClickHouse server logs |
 | `langfuse-minio-data` | MinIO object storage |
 | `langfuse-redis-data` | Redis RDB/AOF data |
-| `qdrant-storage` | Qdrant vector database |
+| `vllm-compile-cache` | torch.compile + FlashInfer autotune configs |
+| `vllm-flashinfer-cache` | FlashInfer JIT kernel workspace |
+| `vllm-triton-cache` | Triton kernel cache |
+| `vllm-embed-compile-cache` | Embedding engine compile cache |

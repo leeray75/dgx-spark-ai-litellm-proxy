@@ -4,8 +4,8 @@
 # For NVIDIA DGX Spark (Blackwell GB10) workstation
 #
 # Usage:
-#   ./restart.sh                    # Restart Qwen3.6-27B-FP8 (default)
-#   ./restart.sh qwen3.6            # Restart Qwen3.6-27B-FP8
+#   ./restart.sh                    # Restart Qwen3.6-35B-A3B-NVFP4 (default)
+#   ./restart.sh qwen3.6            # Restart Qwen3.6-35B-A3B-NVFP4
 #   ./restart.sh qwen               # Restart Qwen3-Coder-Next-FP8
 #   ./restart.sh nemotron           # Restart Nemotron-3-Super-120B
 #   ./restart.sh clean              # Stop and clear caches
@@ -21,7 +21,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 COMPOSE_QWEN36="${PROJECT_DIR}/docker-compose.qwen3.6.yml"
 COMPOSE_QWEN="${PROJECT_DIR}/docker-compose.yml"
 COMPOSE_NEMOTRON="${PROJECT_DIR}/docker-compose.nemotron.yml"
-CONTAINER_QWEN36="qwen3-6-27b-engine"
+CONTAINER_QWEN36="qwen3-6-35b-nvfp4-engine"          # updated
 CONTAINER_QWEN="qwen3-coder-next-engine"
 CONTAINER_NEMOTRON="nemotron-engine"
 
@@ -51,9 +51,9 @@ stop_all() {
     fi
 }
 
-# Start Qwen3.6-27B-FP8
+# Start Qwen3.6-35B-A3B-NVFP4
 start_qwen36() {
-    log_info "Starting Qwen3.6-27B-FP8 stack..."
+    log_info "Starting Qwen3.6-35B-A3B-NVFP4 stack..."
     docker compose -f "$COMPOSE_QWEN36" up -d
 }
 
@@ -124,7 +124,7 @@ restart_stack() {
     # 3. Start appropriate stack
     if [[ "$model" == "qwen3.6" ]]; then
         start_qwen36
-        wait_for_container "$CONTAINER_QWEN36" "Qwen3.6-27B-FP8"
+        wait_for_container "$CONTAINER_QWEN36" "Qwen3.6-35B-A3B-NVFP4"
     elif [[ "$model" == "qwen" ]]; then
         start_qwen
         wait_for_container "$CONTAINER_QWEN" "Qwen3-Coder-Next-FP8"
@@ -142,7 +142,7 @@ restart_stack() {
     echo ""
     
     if [[ "$model" == "qwen3.6" ]]; then
-        echo "  Qwen3.6-27B-FP8:"
+        echo "  Qwen3.6-35B-A3B-NVFP4:"
         echo "    API:    http://localhost:4000/v1"
         echo "    Engine: http://localhost:8301/v1"
     elif [[ "$model" == "qwen" ]]; then
@@ -163,18 +163,16 @@ show_status() {
     log_info "Container Status..."
     echo ""
     
-    local qwen36_status="stopped"
-    local qwen_status="stopped"
-    local nemotron_status="stopped"
-    
-    if docker ps --format '{{.Names}}' | grep -q "^qwen3-6-27b-engine$"; then
+    if docker ps --format '{{.Names}}' | grep -q "^qwen3-6-35b-nvfp4-engine$"; then
+        local qwen36_status
         qwen36_status=$(docker inspect -f '{{.State.Health.Status}}' "$CONTAINER_QWEN36" 2>/dev/null || echo "running")
-        echo "  ${GREEN}Qwen3.6-27B-FP8${NC}: $qwen36_status (port 8301)"
+        echo "  ${GREEN}Qwen3.6-35B-A3B-NVFP4${NC}: $qwen36_status (port 8301)"
     else
-        echo "  ${RED}Qwen3.6-27B-FP8${NC}: stopped (port 8301)"
+        echo "  ${RED}Qwen3.6-35B-A3B-NVFP4${NC}: stopped (port 8301)"
     fi
     
     if docker ps --format '{{.Names}}' | grep -q "^qwen3-coder-next-engine$"; then
+        local qwen_status
         qwen_status=$(docker inspect -f '{{.State.Health.Status}}' "$CONTAINER_QWEN" 2>/dev/null || echo "running")
         echo "  ${GREEN}Qwen3-Coder-Next-FP8${NC}: $qwen_status (port 8300)"
     else
@@ -182,6 +180,7 @@ show_status() {
     fi
     
     if docker ps --format '{{.Names}}' | grep -q "^nemotron-engine$"; then
+        local nemotron_status
         nemotron_status=$(docker inspect -f '{{.State.Health.Status}}' "$CONTAINER_NEMOTRON" 2>/dev/null || echo "running")
         echo "  ${GREEN}Nemotron-3-Super-120B${NC}: $nemotron_status (port 8200)"
     else
@@ -200,13 +199,13 @@ show_help() {
     echo "  $0 --help        — Show this help message"
     echo ""
     echo "Models:"
-    echo "  qwen3.6   — Qwen3.6-27B-FP8 (default, 27B dense, vision-enabled)"
+    echo "  qwen3.6   — Qwen3.6-35B-A3B-NVFP4 (default, 35B MoE 3B activated, text-only)"
     echo "  qwen      — Qwen3-Coder-Next-FP8 (80B total, FP8 quant)"
     echo "  nemotron  — Nemotron-3-Super-120B-A12B-NVFP4 (NVFP4 quant)"
     echo ""
     echo "Examples:"
-    echo "  $0              # Restart Qwen3.6-27B-FP8 (default)"
-    echo "  $0 qwen3.6      # Restart Qwen3.6-27B-FP8"
+    echo "  $0              # Restart Qwen3.6-35B-A3B-NVFP4 (default)"
+    echo "  $0 qwen3.6      # Restart Qwen3.6-35B-A3B-NVFP4"
     echo "  $0 qwen         # Restart Qwen3-Coder-Next-FP8"
     echo "  $0 nemotron     # Restart Nemotron-3-Super-120B"
     echo "  $0 status       # Check container status"

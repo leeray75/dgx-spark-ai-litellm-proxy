@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-07-13
+
+### Added
+
+- **Qwen3.6-35B-A3B-NVFP4 as new default model** — replaces Qwen3.6-27B-FP8; 35B MoE (3B activated), NVFP4 quantized, text-only
+- **Multimodal embedding model** — `nvidia/llama-nemotron-embed-vl-1b-v2` (~1.7B params, 2048-dim output) runs concurrently with chat engine on port 8302
+- **Persistent cache volumes** — `vllm-compile-cache` (torch.compile + FlashInfer autotune configs), `vllm-flashinfer-cache` (FlashInfer JIT kernel workspace), `vllm-triton-cache` (Triton kernel cache)
+- **Debug command variant** — commented-out `--enforce-eager` command block for diagnosing FlashInfer autotune hangs
+
+### Changed
+
+- **vLLM image**: `v0.19.1-cu130` → `nightly` (required for FlashInfer persistent autotune cache, PR #44071+)
+- **GPU memory utilization**: 0.60 → 0.4 (matches official NVIDIA spec; reduces swap pressure on 128GB unified memory)
+- **Max num sequences**: 20 → 4 (memory headroom for observability stack)
+- **Max batched tokens**: 32768 → 8192 (matches official NVIDIA spec; may need reverting based on observed Cline latency)
+- **Tool call parser**: `qwen3_coder` → `qwen3_xml` (matches official NVIDIA spec)
+- **Load format**: added `--load-format fastsafetensors` (reduces weight-loading time)
+- **Speculative config**: `qwen3_next_mtp/2` → `mtp/3` with `moe_backend: triton` (matches official DGX-Spark command)
+- **LiteLLM dependency**: `qwen3-6-27b-engine` → `qwen3-6-35b-nvfp4-engine` with `service_healthy` condition
+- **LiteLLM memory limit**: added 1G hard limit
+- **Langfuse memory limits**: raised to 1.5G with `NODE_OPTIONS=--max-old-space-size=1024` (prevents V8 heap OOM under real traffic)
+- **Restart script**: container name updated to `qwen3-6-35b-nvfp4-engine`
+
+### Removed
+
+- **Claude Code proxy aliases** — `claude-sonnet-4-6` and `claude-haiku-4-6` removed (no longer mapped in LiteLLM config)
+- **Vision support** — Qwen3.6-35B-A3B-NVFP4 is text-only; `supports_vision: false`
+- **`--language-model-only` flag** — not applicable to this model architecture
+- **`--max-cudagraph-capture-size 128`** — reverted to 256 (matching earlier deliberate decision)
+
+### Fixed
+
+- **FlashInfer autotune persistent cache** — nightly image > 2026-05-31 enables cache persistence; first boot re-tunes once (~10-60 min), subsequent boots load cache (fast restart)
+- **LiteLLM startup timing** — changed vLLM dependency from `service_started` to `service_healthy` (3600s start_period); prevents LiteLLM forwarding requests before vLLM is ready
+- **FlashInfer version check** — added `FLASHINFER_DISABLE_VERSION_CHECK=1` and `CUTE_DSL_ARCH=sm_121a` for GB10 Blackwell SM121a architecture
+
 ## [1.2.1] - 2026-05-04
 
 ### Changed
