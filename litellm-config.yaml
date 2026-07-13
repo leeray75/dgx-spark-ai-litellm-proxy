@@ -1,83 +1,44 @@
 # =============================================================================
 # litellm-config.yaml
 # =============================================================================
-# vLLM is started with --served-model-name qwen3-coder-next
-# So ALL litellm_params.model references must use: hosted_vllm/qwen3-coder-next
+# vLLM is started with --served-model-name qwen3.6-35b-a3b
+# So ALL litellm_params.model references must use: hosted_vllm/qwen3.6-35b-a3b
 #
-# Changes vs original:
-#   max_input_tokens:  32768 → 262144 on sonnet/qwen aliases (matches --max-model-len)
-#   max_output_tokens: 8192  → 16384  on sonnet/qwen aliases (conservative was unnecessary)
-#   max_tokens:        32768 → 262144 on sonnet/qwen aliases
-#   claude-haiku-4-5:  kept short (32768 input / 4096 output) — fast-task alias,
-#                      prevents Claude Code routing 200K prompts to the "cheap" slot
-#   stream_timeout:    added 300s — catches stalled streams before request_timeout fires
-#   cache_params:      moved Redis cache config here (was only in compose env vars);
-#                      explicit ttl=3600, scoped to completion call types only
+# Model: nvidia/Qwen3.6-35B-A3B-NVFP4
+#   35B MoE (3B activated), NVFP4 quantized
+#   Engine port: 8301
+#   Vision support: no (text-only MoE checkpoint; no vision encoder)
+#   Reasoning parser: qwen3 (required to prevent thinking tokens in output)
+#   max-model-len: 131072 (GB10-tuned; raise to 262144 in vLLM if stable)
+#
+# Changes vs qwen3.6-27b config:
+#   model references: qwen3.6-27b → qwen3.6-35b-a3b
+#   api_base:         qwen3-6-27b-engine → qwen3-6-35b-nvfp4-engine
+#   max_tokens:       262144 → 131072 (matches GB10-tuned --max-model-len)
+#   max_input_tokens: 262144 → 131072
+#   supports_vision:  true → false (NVFP4 MoE checkpoint has no vision encoder)
+#   added: llama-nemotron-embed-vl-1b-v2 embedding model (docker-compose.qwen3.6.yml, port 8302)
+#   removed: claude-sonnet-4-6 / claude-haiku-4-6 Claude Code proxy aliases
 # =============================================================================
-#
-# Qwen3.6-27B-FP8 Support:
-#   - served-model-name: qwen3.6-27b
-#   - engine port: 8301
-#   - Vision support: yes (supports_vision: true)
-#   - Reasoning parser: qwen3 (required to prevent thinking tokens in output)
-#
-# ============================================================================
 
 model_list:
 
-  # ── Claude Code: main model (Qwen3.6-27B-FP8) ───────────────────────────────
-  # Full context window exposed — Claude Code will use up to 262K for large repos
-  # Supports vision (Qwen3.6 has built-in vision encoder)
-  - model_name: claude-sonnet-4-6
-    litellm_params:
-      model: hosted_vllm/qwen3.6-27b               # matches --served-model-name exactly
-      api_base: http://qwen3-6-27b-engine:8000/v1
-      api_key: "none"
-    model_info:
-      max_tokens: 262144
-      max_input_tokens: 262144                     # matches vLLM --max-model-len
-      max_output_tokens: 16384                     # 8192 was unnecessarily conservative
-      supports_tool_choice: true
-      supports_function_calling: true
-      supports_vision: true                        # Qwen3.6 has vision encoder
-      input_cost_per_token: 0.000000015   # prefill is fast, cheaper per token
-      output_cost_per_token: 0.000000035  # generation is slower, more kWh per token
-
-  # ── Claude Code: background/fast tasks ──────────────────────────────────────
-  # Intentionally short context — Claude Code routes quick/cheap tasks here.
-  # Keeping max_input_tokens low prevents it from sending huge prompts to the
-  # "fast" alias and accidentally saturating the single backend with long prefills.
-  - model_name: claude-haiku-4-6
-    litellm_params:
-      model: hosted_vllm/qwen3.6-27b               # same backend (Qwen3.6)
-      api_base: http://qwen3-6-27b-engine:8000/v1
-      api_key: "none"
-    model_info:
-      max_tokens: 32768
-      max_input_tokens: 32768                      # keep short — fast-task alias
-      max_output_tokens: 4096
-      supports_tool_choice: true
-      supports_function_calling: true
-      supports_vision: true                        # Qwen3.6 has vision encoder
-      input_cost_per_token: 0.000000015   # prefill is fast, cheaper per token
-      output_cost_per_token: 0.000000035  # generation is slower, more kWh per token
-
   # ── Other agents: friendly name ─────────────────────────────────────────────
-  # Full context window — use this alias when you want the full 262K
-  - model_name: qwen3.6-27b
+  # Full context window — use this alias when you want the full 131K
+  - model_name: qwen3.6-35b-a3b
     litellm_params:
-      model: hosted_vllm/qwen3.6-27b
-      api_base: http://qwen3-6-27b-engine:8000/v1
+      model: hosted_vllm/qwen3.6-35b-a3b
+      api_base: http://qwen3-6-35b-nvfp4-engine:8000/v1
       api_key: "none"
     model_info:
-      max_tokens: 262144
-      max_input_tokens: 262144
+      max_tokens: 131072
+      max_input_tokens: 131072
       max_output_tokens: 16384
       supports_tool_choice: true
       supports_function_calling: true
-      supports_vision: true                        # Qwen3.6 has vision encoder
-      input_cost_per_token: 0.000000015   # prefill is fast, cheaper per token
-      output_cost_per_token: 0.000000035  # generation is slower, more kWh per token
+      supports_vision: false
+      input_cost_per_token: 0.000000015
+      output_cost_per_token: 0.000000035
 
   # ── Qwen3-Coder-Next (separate compose: docker-compose.yml) ─────────────────
   - model_name: qwen3-coder-next
@@ -92,8 +53,8 @@ model_list:
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: false
-      input_cost_per_token: 0.000000015   # prefill is fast, cheaper per token
-      output_cost_per_token: 0.000000035  # generation is slower, more kWh per token
+      input_cost_per_token: 0.000000015
+      output_cost_per_token: 0.000000035
 
   # ── Nemotron (separate compose) ─────────────────────────────────────────────
   - model_name: nemotron-super
@@ -108,24 +69,42 @@ model_list:
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: false
-      input_cost_per_token: 0.000000015   # prefill is fast, cheaper per token
-      output_cost_per_token: 0.000000035  # generation is slower, more kWh per token
+      input_cost_per_token: 0.000000015
+      output_cost_per_token: 0.000000035
+
+  # ── Embedding: nvidia/llama-nemotron-embed-vl-1b-v2 ─────────────────────────
+  # Multimodal (text/image/image+text) embedding model, 2048-dim output.
+  # Runs alongside the chat engine (docker-compose.qwen3.6.yml, port 8302) —
+  # small enough not to need exclusive GPU access like the main chat models.
+  # Call via POST /v1/embeddings. For text: {"input": "query text"}.
+  # For image/image+text, pass OpenAI-style content parts (image_url + text)
+  # since the backend is an image-capable VLM embedder, not a text-only model.
+  - model_name: llama-nemotron-embed-vl-1b-v2
+    litellm_params:
+      model: hosted_vllm/llama-nemotron-embed-vl-1b-v2   # matches --served-model-name
+      api_base: http://nemotron-embed-vl-engine:8000/v1
+      api_key: "none"
+    model_info:
+      mode: embedding
+      max_input_tokens: 10240                            # image+text combined limit
+      output_vector_size: 2048
+      supports_vision: true
+      input_cost_per_token: 0.000000015
 
 litellm_settings:
   drop_params: true
   drop_unsupported_params: true
   modify_params: true
   request_timeout: 600
-  stream_timeout: 300                            # catches stalled streams before request_timeout fires
+  stream_timeout: 300
   num_retries: 3
   turn_off_message_logging: false
   callbacks: ["langfuse_otel"]
 
   # Redis exact-match prompt cache
-  # Defined here (not just in compose env vars) so it's explicit and portable.
-  # ttl=3600: cached responses expire after 1 hour — tune down for highly dynamic workloads.
-  # Pairs with the 75-81% vLLM prefix cache hit rate: vLLM handles partial prefix reuse,
-  # LiteLLM handles 100%-identical request short-circuiting before vLLM is even called.
+  # ttl=3600: cached responses expire after 1 hour.
+  # Pairs with vLLM prefix cache: vLLM handles partial prefix reuse,
+  # LiteLLM short-circuits 100%-identical requests before vLLM is called.
   cache: true
   cache_params:
     type: redis

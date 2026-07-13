@@ -8,44 +8,14 @@ The LiteLLM proxy provides an OpenAI-compatible API, which means it works with a
 
 | Agent/Tool | API Model | Port | Purpose |
 |------------|-----------|------|---------|
-| Claude Code | `claude-sonnet-4-6`, `claude-haiku-4-6` | 4000 | Terminal-based AI assistant |
-| Cline Code | `qwen3.6-27b`, `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
-| Cursor IDE | `qwen3.6-27b`, `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
-| Continue | `qwen3.6-27b`, `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
-| Codeium | `qwen3.6-27b`, `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
+| Cline Code | `qwen3.6-35b-a3b`, `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
+| Cursor IDE | `qwen3.6-35b-a3b`, `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
+| Continue | `qwen3.6-35b-a3b`, `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
+| Codeium | `qwen3.6-35b-a3b`, `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
 | OpenWebUI | Direct endpoint | 3000 | Web-based LLM interface |
-| OpenAI SDK | `qwen3.6-27b`, `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
+| OpenAI SDK | `qwen3.6-35b-a3b`, `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
 
----
-
-## Claude Code
-
-Claude Code is a terminal-based AI assistant from Anthropic.
-
-### Setup
-
-**Settings file location:**
-
-| Platform | Path |
-|----------|------|
-| Windows | `C:\Users\<username>\.claude\settings.json` |
-| macOS/Linux | `~/.claude/settings.json` |
-
-**Configuration:**
-
-```json
-{
-  "defaultShell": "bash",
-  "env": {
-    "BASH_ENV": "/home/leeray/.bashrc",
-    "ANTHROPIC_BASE_URL": "http://localhost:4000",
-    "ANTHROPIC_AUTH_TOKEN": "sk-your-litellm-master-key",
-    "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-6",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"
-  }
-}
-```
+> **Note:** Claude Code proxy aliases (`claude-sonnet-4-6`, `claude-haiku-4-6`) were removed in v1.3.0. Use `qwen3.6-35b-a3b` directly or configure Claude Code with a custom base URL (see CLAUDE.md).
 
 ---
 
@@ -67,7 +37,7 @@ Cline is a VS Code extension that acts as an AI programming assistant, allowing 
 ```json
 {
   "cline.modelConfig": {
-    "model": "qwen3.6-27b",
+    "model": "qwen3.6-35b-a3b",
     "apiBaseUrl": "http://localhost:4000/v1",
     "apiKey": "sk-your-litellm-master-key",
     "enableClineLogging": true
@@ -104,7 +74,7 @@ Cursor is an AI-powered code editor built on VS Code with integrated LLM capabil
   "cursor.apiProvider": "openai",
   "cursor.openai.baseURL": "http://localhost:4000/v1",
   "cursor.openai.apiKey": "sk-your-litellm-master-key",
-  "cursor.model": "qwen3.6-27b",
+  "cursor.model": "qwen3.6-35b-a3b",
   "cursor.autoSuggestEnabled": true
 }
 ```
@@ -117,8 +87,7 @@ Cursor allows switching models via the status bar or commands:
 
 | Model | API Model Name | Use Case |
 |-------|---------------|----------|
-| Main | `qwen3.6-27b` | Complex coding tasks, vision support |
-| Fast | `claude-haiku-4-6` | Quick completions |
+| Main | `qwen3.6-35b-a3b` | Complex coding tasks |
 | Nemotron | `nemotron-super` | Reasoning tasks |
 
 ---
@@ -141,7 +110,7 @@ from continue_chainlit import *
 
 # Configure the proxy
 configure(
-    model="qwen3.6-27b",
+    model="qwen3.6-35b-a3b",
     api_base="http://localhost:4000/v1",
     api_key="sk-your-litellm-master-key"
 )
@@ -153,7 +122,7 @@ configure(
    - Enter:
      - **API Base URL**: `http://localhost:4000/v1`
      - **API Key**: `sk-your-litellm-master-key`
-     - **Model**: `qwen3.6-27b`
+     - **Model**: `qwen3.6-35b-a3b`
 
 ---
 
@@ -218,9 +187,9 @@ client = OpenAI(
     api_key="sk-your-litellm-master-key"
 )
 
-# Qwen3.6-27B-FP8 (default)
+# Qwen3.6-35B-A3B-NVFP4 (default)
 response = client.chat.completions.create(
-    model="qwen3.6-27b",
+    model="qwen3.6-35b-a3b",
     messages=[
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "Write a Python function to sort a list."}
@@ -285,9 +254,9 @@ const client = new OpenAI({
   apiKey: 'sk-your-litellm-master-key'
 });
 
-// Qwen3.6-27B-FP8 (default)
+// Qwen3.6-35B-A3B-NVFP4 (default)
 const response = await client.chat.completions.create({
-  model: 'qwen3.6-27b',
+  model: 'qwen3.6-35b-a3b',
   messages: [
     { role: 'system', content: 'You are a helpful assistant.' },
     { role: 'user', content: 'Write a JavaScript function to sort an array.' }
@@ -334,7 +303,7 @@ OpenWebUI is a self-hosted web interface for interacting with LLMs.
      - **OpenAI API Key**: `sk-your-litellm-master-key`
 
 3. **Select Model**:
-   - Choose `qwen3.6-27b` for main tasks
+   - Choose `qwen3.6-35b-a3b` for main tasks
    - Choose `qwen3-coder-next` for coding tasks
    - Choose `nemotron-super` for reasoning tasks
 
@@ -346,26 +315,24 @@ OpenWebUI is a self-hosted web interface for interacting with LLMs.
 
 | Model Name | Purpose | Backend Model |
 |------------|---------|---------------|
-| `claude-sonnet-4-6` | Main tasks, complex reasoning | Qwen3.6-27B-FP8 |
-| `claude-haiku-4-6` | Fast/background tasks | Qwen3.6-27B-FP8 |
-| `qwen3.6-27b` | Direct access to Qwen3.6 model | Qwen3.6-27B-FP8 |
+| `qwen3.6-35b-a3b` | Direct access to Qwen3.6 model | Qwen3.6-35B-A3B-NVFP4 |
 | `qwen3-coder-next` | Direct access to Qwen3-Coder model | Qwen3-Coder-Next-FP8 |
 | `nemotron-super` | Direct access to Nemotron model | Nemotron-3-Super-120B |
+| `llama-nemotron-embed-vl-1b-v2` | Multimodal embeddings (2048-dim) | Embedding engine |
 
 ### Using Different Models in Your Code
 
 ```python
 # Python - Switch between models
 models = {
-    'main': 'claude-sonnet-4-6',
-    'fast': 'claude-haiku-4-6',
-    'qwen3.6': 'qwen3.6-27b',
+    'main': 'qwen3.6-35b-a3b',
     'qwen': 'qwen3-coder-next',
-    'nemotron': 'nemotron-super'
+    'nemotron': 'nemotron-super',
+    'embed': 'llama-nemotron-embed-vl-1b-v2'
 }
 
 response = client.chat.completions.create(
-    model=models['main'],  # or models['fast'], models['qwen3.6'], etc.
+    model=models['main'],  # or models['qwen'], models['nemotron'], etc.
     messages=[...]
 )
 ```
@@ -377,12 +344,12 @@ response = client.chat.completions.create(
 ### Test API Connection
 
 ```bash
-# Test with curl (Qwen3.6-27B-FP8)
+# Test with curl (Qwen3.6-35B-A3B-NVFP4)
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-your-litellm-master-key" \
   -d '{
-    "model": "qwen3.6-27b",
+    "model": "qwen3.6-35b-a3b",
     "messages": [{"role": "user", "content": "Hello!"}],
     "temperature": 0.7
   }'
@@ -396,6 +363,15 @@ curl http://localhost:4000/v1/chat/completions \
     "messages": [{"role": "user", "content": "Hello!"}],
     "temperature": 0.7
   }'
+
+# Test embedding
+curl http://localhost:4000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-your-litellm-master-key" \
+  -d '{
+    "model": "llama-nemotron-embed-vl-1b-v2",
+    "input": "Hello world"
+  }'
 ```
 
 ### Test Python SDK
@@ -408,10 +384,10 @@ client = OpenAI(
     api_key="sk-your-litellm-master-key"
 )
 
-# Simple health check (Qwen3.6-27B-FP8)
+# Simple health check (Qwen3.6-35B-A3B-NVFP4)
 try:
     response = client.chat.completions.create(
-        model="qwen3.6-27b",
+        model="qwen3.6-35b-a3b",
         messages=[{"role": "user", "content": "Say 'hello'"}],
         max_tokens=10
     )
@@ -440,5 +416,5 @@ except Exception as e:
 - Ensure the model name is in the list
 
 **4. Slow Responses**
-- Check vLLM engine logs: `docker compose logs qwen3-6-27b-engine`
+- Check vLLM engine logs: `docker compose logs qwen3-6-35b-nvfp4-engine`
 - Verify GPU is not out of memory: `nvidia-smi`

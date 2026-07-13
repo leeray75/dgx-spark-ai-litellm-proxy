@@ -95,7 +95,7 @@ openssl rand -hex 32  # For LITELLM_SALT_KEY
 
 ### 5. Start the Stack
 
-#### Start with Qwen3.6-27B-FP8 (default):
+#### Start with Qwen3.6-35B-A3B-NVFP4 (default):
 
 ```bash
 docker compose -f docker-compose.qwen3.6.yml up -d
@@ -123,20 +123,23 @@ docker compose ps
 docker compose logs -f
 
 # Check specific service logs
-docker compose logs -f qwen3-6-27b-engine    # For Qwen3.6
-docker compose logs -f qwen3-coder-next-engine # For Qwen3-Coder
-docker compose logs -f nemotron-engine        # For Nemotron
+docker compose logs -f qwen3-6-35b-nvfp4-engine   # For Qwen3.6
+docker compose logs -f nemotron-embed-vl-engine    # For Embedding (Qwen3.6 stack)
+docker compose logs -f qwen3-coder-next-engine     # For Qwen3-Coder
+docker compose logs -f nemotron-engine             # For Nemotron
 ```
 
 ### 7. Wait for Services to Start
 
-- **First start**: May take 10-15 minutes for model loading
+- **First start**: May take 10-60 minutes for model loading (Qwen3.6 first boot includes FlashInfer autotuning)
+- **Subsequent starts**: Typically 5-15 minutes (cache-hit from vllm-compile-cache volume)
 - **Langfuse**: Wait until UI is accessible at http://localhost:3000
 - **vLLM Engine**: Check `/health` endpoint returns 200
 
 ```bash
 # Check vLLM health
-curl http://localhost:8301/health  # For Qwen3.6
+curl http://localhost:8301/health  # For Qwen3.6-35B
+curl http://localhost:8302/health  # For Embedding Engine (Qwen3.6 stack)
 curl http://localhost:8300/health  # For Qwen3-Coder
 curl http://localhost:8200/health  # For Nemotron
 ```
@@ -157,12 +160,12 @@ curl http://localhost:8200/health  # For Nemotron
 # Set your master key
 export LITELLM_MASTER_KEY=sk-your-master-key
 
-# Test Qwen3.6-27B-FP8 (default)
+# Test Qwen3.6-35B-A3B-NVFP4 (default)
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -d '{
-    "model": "qwen3.6-27b",
+    "model": "qwen3.6-35b-a3b",
     "messages": [{"role": "user", "content": "Hello!"}],
     "temperature": 0.7
   }'
@@ -186,27 +189,14 @@ curl http://localhost:4000/v1/chat/completions \
     "messages": [{"role": "user", "content": "Hello!"}],
     "temperature": 0.7
   }'
-```
 
-### Test Claude Code Models
-
-```bash
-# claude-sonnet-4-6 (main tasks, Qwen3.6)
-curl http://localhost:4000/v1/chat/completions \
+# Test Embedding Model
+curl http://localhost:4000/v1/embeddings \
+  -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -d '{
-    "model": "claude-sonnet-4-6",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "temperature": 0.7
-  }'
-
-# claude-haiku-4-6 (fast tasks, Qwen3.6)
-curl http://localhost:4000/v1/chat/completions \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -d '{
-    "model": "claude-haiku-4-6",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "temperature": 0.7
+    "model": "llama-nemotron-embed-vl-1b-v2",
+    "input": "Hello world"
   }'
 ```
 
@@ -215,7 +205,7 @@ curl http://localhost:4000/v1/chat/completions \
 To switch between models after installation:
 
 ```bash
-# Switch to Qwen3.6-27B-FP8 (default)
+# Switch to Qwen3.6-35B-A3B-NVFP4 (default)
 ./scripts/model-switch.sh qwen3.6
 
 # Switch to Qwen3-Coder-Next-FP8
