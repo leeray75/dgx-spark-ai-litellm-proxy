@@ -576,7 +576,6 @@ services:
       # and adjust this mount if it prints something other than
       # /root/.cache/flashinfer.
       - vllm-flashinfer-cache:/root/.cache/flashinfer
-      - vllm-triton-cache:/root/.triton
     environment:
       HF_TOKEN: ${HF_TOKEN}
       FLASHINFER_DISABLE_VERSION_CHECK: "1"
