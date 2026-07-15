@@ -1,6 +1,28 @@
-# Changelog
+# Changelog 
 
 All notable changes to this project will be documented in this file.
+
+## [1.4.0] - 2026-07-15
+
+### Changed
+
+- **Qwen3.6 checkpoint swap**: Replaced `nvidia/Qwen3.6-35B-A3B-NVFP4` (NVIDIA ModelOpt, Marlin backend) with `unsloth/Qwen3.6-35B-A3B-NVFP4-Fast` (compressed-tensors, FlashInfer b12x backend)
+  - `--quantization modelopt` → `compressed-tensors`
+  - `--moe-backend marlin` → `flashinfer_b12x` (native FlashInfer FP4 for SM121)
+  - `--speculative-config num_speculative_tokens` 3 → 2
+  - Removed old ModelOpt+Marlin env vars (`VLLM_NVFP4_GEMM_BACKEND`, `VLLM_USE_FLASHINFER_MOE_FP4`, `VLLM_FP8_MOE_BACKEND`)
+  - `--linear-backend` deliberately left UNSET (defaults to `auto`)
+
+### Added
+
+- **CLAUDE.md documentation**: Cross-file dependencies, startup timing and cache behavior, vLLM image versions, memory budget, engine health checks, model-switch.sh cache note
+- **docs/models.md**: Updated Qwen3.6 config example with new checkpoint, quantization, and backend flags
+
+### Fixed
+
+- **docs/models.md**: Updated stale model ID and vLLM configuration example to reflect unsloth checkpoint swap
+- **docs/architecture.md**: Corrected vLLM image versions — Nemotron (`v0.18.1-cu130`), Qwen3-Coder (`v0.19.1-cu130`), only Qwen3.6 uses `nightly`
+- **docs/setup.md**: Updated startup timing to match CLAUDE.md (~10-35 min first boot, ~5-15 min cache-hit)
 
 ## [1.3.0] - 2026-07-13
 

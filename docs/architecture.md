@@ -76,8 +76,10 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 |---------|-------|------|-------|--------------|
 | Qwen3.6 Engine | `vllm/vllm-openai:nightly` | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 |
 | Embedding Engine | `vllm/vllm-openai:nightly` | 8302 | llama-nemotron-embed-vl-1b-v2 | N/A |
-| Qwen3-Coder Engine | `vllm/vllm-openai:nightly` | 8300 | Qwen3-Coder-Next-FP8 | FP8 |
-| Nemotron Engine | `vllm/vllm-openai:nightly` | 8200 | Nemotron-3-Super-120B | NVFP4 |
+| Qwen3-Coder Engine | `vllm/vllm-openai:v0.19.1-cu130` | 8300 | Qwen3-Coder-Next-FP8 | FP8 |
+| Nemotron Engine | `vllm/vllm-openai:v0.18.1-cu130` | 8200 | Nemotron-3-Super-120B | NVFP4 |
+
+> **Note:** Each compose stack pins a different vLLM image — do not swap these. Nemotron requires `v0.18.1` (not `v0.19.1`), and Qwen3-Coder uses `v0.19.1` for GDN/Mamba stability. Only the Qwen3.6 stack uses `nightly` for FlashInfer persistent cache support.
 
 ### Proxy Layer
 

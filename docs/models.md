@@ -16,7 +16,7 @@ This guide compares the three supported LLMs for the **NVIDIA DGX Spark (Blackwe
 | **Quantization** | NVFP4 (NVIDIA 4-bit) |
 | **Context Window** | 262K tokens (configurable, 131K default in LiteLLM) |
 | **VRAM Required** | ~26 GB (weights) |
-| **Model ID** | `nvidia/Qwen3.6-35B-A3B-NVFP4` |
+| **Model ID** | `unsloth/Qwen3.6-35B-A3B-NVFP4-Fast` |
 | **vLLM Image** | `vllm/vllm-openai:nightly` |
 | **Port** | 8301 |
 
@@ -165,22 +165,22 @@ qwen3-6-35b-nvfp4-engine:
     HF_TOKEN: ${HF_TOKEN}
     FLASHINFER_DISABLE_VERSION_CHECK: "1"
     CUTE_DSL_ARCH: sm_121a
-    VLLM_NVFP4_GEMM_BACKEND: marlin
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
   command:
-    --model nvidia/Qwen3.6-35B-A3B-NVFP4
+    --model unsloth/Qwen3.6-35B-A3B-NVFP4-Fast
     --served-model-name qwen3.6-35b-a3b
     --dtype auto
-    --quantization modelopt
+    --quantization compressed-tensors
     --kv-cache-dtype fp8
     --gpu-memory-utilization 0.4
     --max-model-len 262144
     --max-num-seqs 4
     --max-num-batched-tokens 8192
     --load-format fastsafetensors
-    --moe-backend marlin
+    --moe-backend flashinfer_b12x
     --tool-call-parser qwen3_xml
     --reasoning-parser qwen3
-    --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'
+    --speculative-config '{"method":"mtp","num_speculative_tokens":2,"moe_backend":"triton"}'
 ```
 
 ### Qwen3-Coder-Next-FP8 (docker-compose.yml)
