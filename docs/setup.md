@@ -131,8 +131,9 @@ docker compose logs -f nemotron-engine             # For Nemotron
 
 ### 7. Wait for Services to Start
 
-- **First start**: May take 10-60 minutes for model loading (Qwen3.6 first boot includes FlashInfer autotuning)
-- **Subsequent starts**: Typically 5-15 minutes (cache-hit from vllm-compile-cache volume)
+- **First start**: May take ~10-35 minutes for model loading (Qwen3.6 first boot includes FlashInfer fp8_gemm autotuning); results persist in `vllm-compile-cache` volume
+- **Subsequent starts**: Typically ~5-15 minutes when cache is loaded from `vllm-compile-cache` volume
+- **Cache invalidation**: Changing `--gpu-memory-utilization`, `--max-num-batched-tokens`, `--max-model-len`, or the vLLM image version forces a full re-tune on next boot
 - **Langfuse**: Wait until UI is accessible at http://localhost:3000
 - **vLLM Engine**: Check `/health` endpoint returns 200
 
