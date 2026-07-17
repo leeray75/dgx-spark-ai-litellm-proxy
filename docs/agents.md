@@ -15,7 +15,7 @@ The LiteLLM proxy provides an OpenAI-compatible API, which means it works with a
 | OpenWebUI | Direct endpoint | 3000 | Web-based LLM interface |
 | OpenAI SDK | `qwen3.6-35b-a3b`, `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
 
-> **Note:** Claude Code proxy aliases (`claude-sonnet-4-6`, `claude-haiku-4-6`) were removed in v1.3.0. Use `qwen3.6-35b-a3b` directly or configure Claude Code with a custom base URL (see CLAUDE.md).
+> **Note:** The `anthropic/*` wildcard passthrough (added v1.4.0) now routes all Claude model requests directly to Anthropic's real API via the proxy, with a fallback to the local Qwen3.6 engine if the Anthropic API is unavailable. This replaces the older approach of using individual `claude-sonnet-4-6` / `claude-haiku-4-6` proxy aliases (removed in v1.3.0).
 
 ---
 

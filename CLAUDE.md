@@ -130,7 +130,7 @@ Each compose file pins a different vLLM image — do not swap these:
 | `nemotron-super` | Nemotron-3-Super-120B | General reasoning (32K context) |
 | `llama-nemotron-embed-vl-1b-v2` | llama-nemotron-embed-vl-1b-v2 | Multimodal (text/image) embedding, 2048-dim (`/v1/embeddings`) |
 
-> **Note:** Claude Code proxy aliases (`claude-sonnet-4-6`, `claude-haiku-4-6`) were removed in v1.3.0. Use `qwen3.6-35b-a3b` directly or configure Claude Code with a custom base URL.
+> **Note:** The `anthropic/*` wildcard passthrough (added v1.4.0) routes all Claude model IDs — including future releases and any alias Claude Code/Desktop introduces — directly to Anthropic's real API via the proxy. A `default_fallbacks` entry sends failed requests to the local Qwen3.6 engine. This replaces the older approach of using individual `claude-sonnet-4-6` / `claude-haiku-4-6` proxy aliases (removed in v1.3.0).
 
 ## Key vLLM Flags by Model
 
