@@ -134,9 +134,9 @@ Each compose file pins a different vLLM image — do not swap these:
 
 ## Key vLLM Flags by Model
 
-- **Qwen3.6**: serves `unsloth/Qwen3.6-35B-A3B-NVFP4-Fast` (compressed-tensors quant, not the earlier `nvidia/Qwen3.6-35B-A3B-NVFP4` ModelOpt checkpoint — see `docker-compose.qwen3.6.yml` Corrections item 13); `--reasoning-parser qwen3` required (prevents thinking tokens leaking); `--speculative-config '{"method":"mtp","num_speculative_tokens":2}'`; `--gpu-memory-utilization 0.4` (official NVIDIA spec); `--tool-call-parser qwen3_xml` (official NVIDIA spec); `--load-format fastsafetensors`; `--moe-backend flashinfer_b12x` (required on DGX Spark for this checkpoint — omitting it is reported ~2x slower)
+- **Qwen3.6**: `--reasoning-parser qwen3` required (prevents thinking tokens leaking); `--speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'`; `--gpu-memory-utilization 0.4` (official NVIDIA spec); `--tool-call-parser qwen3_xml` (official NVIDIA spec); `--load-format fastsafetensors`
   - `--max-num-batched-tokens 8192` matches the official DGX Spark spec but reduces Cline large-context ingestion throughput vs. the previous value of `262144`. If Cline latency regresses noticeably under real traffic, raising this back toward `262144` is the first lever to pull.
-  - `--linear-backend` is deliberately left unset (defaults to `auto`) — explicitly setting `--linear-backend flashinfer_b12x` has an open community-reported crash on this checkpoint family.
+  - `VLLM_NVFP4_GEMM_BACKEND=marlin` env var (not `--linear-backend marlin` — that flag crashes startup on this model due to FP8-quantized GDN attention projection layers).
 - **Qwen3-Coder-Next**: `--mamba-ssm-cache-dtype float32` required for GDN/SSM layer stability; `--max-cudagraph-capture-size 128` prevents GDN Mamba OOM
 - **Nemotron**: Uses custom reasoning parser plugin at `scripts/super_v3_reasoning_parser.py`; requires vLLM `v0.18.1` (not `v0.19.1`)
 

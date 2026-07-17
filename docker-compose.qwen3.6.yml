@@ -40,14 +40,10 @@
 #   likely to need reverting based on actual observed Cline behavior, not
 #   something to treat as settled just because it now matches the card.
 #
-# NOT changed, and why (at the time of the spec-alignment pass): --quantization
-# modelopt (present in the card's GENERIC command, absent from its DGX-Spark-
-# specific command — inconsistency in NVIDIA's own docs, not something to
-# resolve by guessing; this flag had worked correctly across every successful
-# boot so far, left as-is at the time). SUPERSEDED by Corrections item 13 below
-# — the engine was later switched off the nvidia/modelopt checkpoint entirely
-# in favor of unsloth/Qwen3.6-35B-A3B-NVFP4-Fast (compressed-tensors), so this
-# flag is now --quantization compressed-tensors. Also not changed:
+# NOT changed, and why: --quantization modelopt (present in the card's GENERIC
+# command, absent from its DGX-Spark-specific command — inconsistency in
+# NVIDIA's own docs, not something to resolve by guessing; this flag has worked
+# correctly across every successful boot so far, left as-is). Also not changed:
 # --mamba-ssm-cache-dtype float32, --max-cudagraph-capture-size 256,
 # --served-model-name, --uvicorn-log-level, --default-chat-template-kwargs,
 # --override-generation-config — none of these appear in the official command,
@@ -87,10 +83,7 @@
 #      + LiteLLM + Redis (drop Postgres/ClickHouse/MinIO/Langfuse), or stop the
 #      observability stack before long coding sessions and restart it after.
 #
-# Source: https://huggingface.co/unsloth/Qwen3.6-35B-A3B-NVFP4-Fast
-#   (previously https://huggingface.co/nvidia/Qwen3.6-35B-A3B-NVFP4 — switched
-#   per Corrections item 13 below; served-model-name unchanged so downstream
-#   Cline/LiteLLM configs did not need touching)
+# Source: https://huggingface.co/nvidia/Qwen3.6-35B-A3B-NVFP4
 #
 # Hardware: NVIDIA DGX Spark workstation with GB10 Superchip (128 GB unified memory)
 #
@@ -106,11 +99,8 @@
 #           "Using FlashInfer autotune cache file: ..." and cache-save on exit.
 #           Pinned working digest: <record here once confirmed>
 #
-# Model:    unsloth/Qwen3.6-35B-A3B-NVFP4-Fast (was nvidia/Qwen3.6-35B-A3B-NVFP4,
-#           see Corrections item 13)
-#           35B MoE (3B activated), NVFP4 quantized via compressed-tensors
-#           (quant_method confirmed directly from the checkpoint's config.json
-#           quantization_config — not assumed from the repo name)
+# Model:    nvidia/Qwen3.6-35B-A3B-NVFP4
+#           35B MoE (3B activated), NVFP4 quantized via NVIDIA Model Optimizer
 #           Hybrid Attention + MoE architecture, checkpoint ~21.8 GiB on disk
 #
 # GB10 memory budget (128GB unified — shared with CPU + every other container below):
@@ -127,27 +117,16 @@
 #   system RAM and VRAM are separate. Now at 0.4 (spec-alignment pass, see above),
 #   expect this to be meaningfully smaller — not yet measured as of this revision.
 #
-# IMPORTANT — FP4 compute on GB10 (SM121), UPDATED per Corrections item 13:
-#   The note that used to live here said vLLM's FlashInfer FP4 kernels didn't
-#   target SM121 and that this engine therefore fell back to Marlin (dequant-
-#   to-BF16, weight-only) for both MoE and linear/GEMM NVFP4 routing. That is
-#   no longer the setup: vLLM gained native FlashInfer b12x FP4 GEMM/MoE
-#   kernels for SM120/SM121 (vllm-project/vllm#40082), and this engine now runs
-#   the unsloth/Qwen3.6-35B-A3B-NVFP4-Fast checkpoint (compressed-tensors, not
-#   ModelOpt) with --moe-backend flashinfer_b12x — confirmed via NVIDIA
-#   developer forum benchmarks on this exact hardware to give a real speedup
-#   over the old Marlin/modelopt path (mean TTFT ~13.6s vs ~38.3s in one
-#   published DGX Spark run), not a guess.
-#   --linear-backend is deliberately left UNSET (defaults to "auto"). Do not
-#   set --linear-backend flashinfer_b12x: a real (as of this revision, still
-#   open and unresolved — not "fixed", just reproduced) community report
-#   (huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF/discussions/43) hit
-#   "ValueError: --linear-backend=flashinfer_b12x was requested but no
-#   'flashinfer_b12x' kernel exists for this layer type" on vLLM 0.24.0 with
-#   this family of checkpoint. Leaving --linear-backend unset matches Unsloth's
-#   own documented serving command for this model (which never sets
-#   --linear-backend, only --moe-backend flashinfer_b12x) and lets vLLM's
-#   "auto" self-select a working kernel per layer type instead.
+# IMPORTANT — FP4 compute on GB10 (SM121):
+#   GB10 has native NVFP4 tensor core support at the hardware level, but vLLM's
+#   FlashInfer-based native FP4 GEMM/MoE kernels currently target Hopper/datacenter
+#   Blackwell (SM90/SM100), not SM121. In practice this means vLLM falls back to the
+#   Marlin kernel (dequant-to-BF16, weight-only) for NVFP4 on this hardware today —
+#   that's expected, not a misconfiguration. MoE routing uses --moe-backend marlin
+#   (CLI flag, safe). NVFP4 linear/GEMM routing uses the VLLM_NVFP4_GEMM_BACKEND=marlin
+#   env var below — NOT the --linear-backend flag, which is broader than the old env
+#   var and crashes this model's FP8-quantized GDN attention projection layers on
+#   GB10 (see "Corrections" note 2 below for the full story).
 #
 # CORRECTED — first-boot init slowness (~75 min), real root cause and real fix:
 #   A real run took init engine (profile, create kv cache, warmup model) = 4477.52s
@@ -280,60 +259,57 @@
 #      hadn't crashed yet but shares the exact same failure mode). Lesson for
 #      any future memory-limit tuning in this file: idle docker stats readings
 #      are not a substitute for testing under real load before trusting a limit.
-#  13. IN-PLACE QUANTIZATION SWAP: replaced nvidia/Qwen3.6-35B-A3B-NVFP4
-#      (NVIDIA ModelOpt, Marlin backend) with unsloth/Qwen3.6-35B-A3B-NVFP4-Fast
-#      (compressed-tensors, FlashInfer b12x backend) as the served checkpoint.
-#      --served-model-name left as "qwen3.6-35b-a3b" — no downstream
-#      Cline/LiteLLM config changes needed. Changes:
-#        --quantization modelopt → compressed-tensors (confirmed directly from
-#          the new checkpoint's config.json quantization_config.quant_method,
-#          not assumed from the repo name)
-#        --moe-backend marlin → flashinfer_b12x (confirmed via NVIDIA developer
-#          forum benchmark reports and Unsloth's own DGX Spark docs as the
-#          required flag for this checkpoint on GB10 — omitting it is reported
-#          as ~2x slower)
-#        --linear-backend deliberately left UNSET (not added). A real
-#          community report (huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF/
-#          discussions/43) hit a ValueError setting
-#          --linear-backend flashinfer_b12x on vLLM 0.24.0 with this checkpoint
-#          family. IMPORTANT CORRECTION vs. an earlier draft of this change:
-#          that report is an open, unresolved 3-day-old community post, NOT a
-#          maintainer-confirmed fix and NOT pinned by anyone at Unsloth —
-#          don't cite it as more authoritative than it is. The reason to leave
-#          --linear-backend unset is independent and better-sourced: it's what
-#          Unsloth's own published serving command for this model does (only
-#          --moe-backend is set), so "auto" is the documented, not just
-#          hoped-for, default.
-#        Removed VLLM_NVFP4_GEMM_BACKEND, VLLM_USE_FLASHINFER_MOE_FP4,
-#          VLLM_FP8_MOE_BACKEND env vars — these were specific to the old
-#          ModelOpt+Marlin path (see the rewritten "FP4 compute on GB10" note
-#          above); they don't apply to compressed-tensors+flashinfer_b12x.
-#        --speculative-config num_speculative_tokens 3→2 and dropped the
-#          "moe_backend":"triton" key — 2 is Unsloth's documented default for
-#          this checkpoint's MTP module (confirmed via Unsloth's docs and
-#          vLLM's own Qwen3.6 recipe page, both of which use
-#          '{"method":"mtp","num_speculative_tokens":2}' with no moe_backend
-#          key); the old triton key was tied to the previous MoE backend.
-#      EXPECTED SIDE EFFECT, not a bug: quantization format + MoE backend +
-#      speculative-config all changed, so the FlashInfer autotune cache key
-#      changes too — expect a full re-tune on the next boot (~10-70 min per
-#      this file's own history, see the "first-boot init" note above).
-#  14. CORRECTION TO ITEM 13: dropping the speculative-config "moe_backend":
-#      "triton" key was wrong and crash-looped the container on every boot.
-#      Root cause (from the actual EngineCore traceback, not docs): the MTP
-#      drafter's FusedMoE layer resolves as *unquantized* regardless of the
-#      main model's compressed-tensors/flashinfer_b12x quantization, and
-#      vLLM's map_unquantized_backend() only accepts
+#  13. IN-PLACE QUANTIZATION SWAP (now REVERTED — see item 15): briefly
+#      replaced nvidia/Qwen3.6-35B-A3B-NVFP4 (NVIDIA ModelOpt, Marlin backend)
+#      with unsloth/Qwen3.6-35B-A3B-NVFP4-Fast (compressed-tensors, FlashInfer
+#      b12x backend) as the served checkpoint, on the theory (confirmed via
+#      NVIDIA developer forum benchmarks and Unsloth's own DGX Spark docs)
+#      that it would be faster on this hardware with no accuracy loss.
+#  14. CORRECTION TO ITEM 13 (also now moot — see item 15): item 13 dropped
+#      the speculative-config "moe_backend":"triton" key, which crash-looped
+#      the container on every boot. Root cause (from the actual EngineCore
+#      traceback): the MTP drafter's FusedMoE layer resolves as *unquantized*
+#      regardless of the main model's compressed-tensors/flashinfer_b12x
+#      quantization, and vLLM's map_unquantized_backend() only accepts
 #      ['triton','flashinfer_trtllm','flashinfer_cutlass','aiter'] for
 #      unquantized MoE — flashinfer_b12x isn't in that list, so
-#      Qwen3_5MoeMTP.__init__ raises ValueError before the engine ever comes
-#      up. Restored '{"method":"mtp","num_speculative_tokens":2,
-#      "moe_backend":"triton"}' in --speculative-config. The main model's
-#      top-level --moe-backend flashinfer_b12x is unaffected and unchanged —
-#      only the MTP drafter needs its own explicit override. Item 13's
-#      premise (Unsloth/vLLM recipe docs show no moe_backend key) describes
-#      the main model's serving command, not the MTP submodule's backend
-#      resolution — don't re-remove this key on that basis again.
+#      Qwen3_5MoeMTP.__init__ raised ValueError before the engine ever came
+#      up. Restored the "moe_backend":"triton" key to fix the crash loop.
+#  15. FULL ROLLBACK of items 13/14: reverted the engine back to
+#      nvidia/Qwen3.6-35B-A3B-NVFP4 (ModelOpt, Marlin backend) — the
+#      known-good config from before item 13, i.e. everything this file
+#      documented through item 12. Reason: after the item-14 crash-loop fix,
+#      the decision was made to roll back to the known-good nvidia/ModelOpt
+#      config rather than keep iterating on the unsloth/compressed-tensors
+#      path live. The unsloth config as it stood right before this rollback
+#      (compressed-tensors, flashinfer_b12x, the item-14 fix applied) is
+#      preserved verbatim in the sibling file
+#      docker-compose.qwen3.6.yml.unsloth-nvfp4-fast.bak for future reference
+#      or re-adoption — it is NOT loaded by `docker compose` (not referenced
+#      in any `-f` invocation), so it has zero effect on what actually runs.
+#      Items 13 and 14 above are kept, not deleted, as the historical record
+#      of what was tried and why it didn't stick — this is the same policy
+#      this file has followed for every other reverted change.
+#      EXPECTED SIDE EFFECT, not a bug: reverting the quantization format,
+#      MoE backend, and speculative-config all changes the FlashInfer autotune
+#      cache key again — expect a full re-tune on the next boot after this
+#      rollback (~10-70 min per this file's own history, see the "first-boot
+#      init" note above).
+#  16. --tool-call-parser qwen3_xml → qwen3_coder. This REVERSES item 11's
+#      spec-alignment change (qwen3_coder → qwen3_xml, on the grounds that
+#      qwen3_xml was the official NVIDIA-documented value and qwen3_coder was
+#      a correctness risk for Cline's tool-call parsing). Explicit request —
+#      no new evidence contradicting item 11's reasoning was presented here;
+#      if Cline tool-call parsing regresses, item 11's original rationale is
+#      the first thing to revisit.
+#  17. --tool-call-parser qwen3_coder → qwen3_xml. REVERTS item 16, back to
+#      item 11's original value. No new evidence either way — item 11's
+#      reasoning (NVIDIA's official DGX-Spark command for this exact
+#      checkpoint specifies qwen3_xml; qwen3_coder's parser targets the
+#      tool-call format Qwen3-Coder models were trained to emit, which this
+#      general-purpose Qwen3.6-35B-A3B checkpoint isn't) was judged more
+#      convincing than whatever prompted item 16, so this is the setting to
+#      leave alone going forward absent a concrete failure with qwen3_xml.
 #
 # External ports (reachable from other machines):
 #   3000  — Langfuse UI + API
@@ -626,7 +602,7 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # vLLM Engine — unsloth/Qwen3.6-35B-A3B-NVFP4-Fast (see Corrections item 13)
+  # vLLM Engine — nvidia/Qwen3.6-35B-A3B-NVFP4
   # NVIDIA DGX Spark — GB10 Superchip (128GB unified memory)
   # ---------------------------------------------------------------------------
   qwen3-6-35b-nvfp4-engine:
@@ -656,13 +632,20 @@ services:
       FLASHINFER_DISABLE_VERSION_CHECK: "1"
       CUTE_DSL_ARCH: sm_121a                # GB10 Blackwell SM architecture, confirmed correct
       VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
-      # REMOVED per Corrections item 13 (quantization swap to compressed-tensors
-      # + flashinfer_b12x): VLLM_USE_FLASHINFER_MOE_FP4, VLLM_FP8_MOE_BACKEND,
-      # and VLLM_NVFP4_GEMM_BACKEND were all specific to the old
-      # nvidia/Qwen3.6-35B-A3B-NVFP4 (ModelOpt) + Marlin path — see the
-      # rewritten "FP4 compute on GB10" note above the services block. None of
-      # them apply to the unsloth/Qwen3.6-35B-A3B-NVFP4-Fast checkpoint now
-      # served here.
+      # RESTORED (correction): these two were previously removed as "dead config"
+      # under the assumption this is a pure NVFP4 checkpoint. That was wrong — the
+      # official model card confirms mixed-precision weights (BF16 · F8_E4M3 · U8
+      # tensor types) and explicitly recommends BOTH of these for DGX Spark.
+      # Deprecation warnings from vLLM here are cosmetic; NVIDIA's own docs still
+      # specify them, and on some builds they've been observed as silent no-ops
+      # ("Unknown vLLM environment variable") — kept anyway per official guidance.
+      VLLM_USE_FLASHINFER_MOE_FP4: "0"
+      VLLM_FP8_MOE_BACKEND: flashinfer_cutlass
+      # KEPT (not part of NVIDIA's documented command, but empirically required):
+      # removing this in favor of --linear-backend marlin crashed startup — see
+      # Corrections note 2. NVIDIA's own launch command doesn't set this at all;
+      # kept because it's proven to work, not because it's official.
+      VLLM_NVFP4_GEMM_BACKEND: marlin
       # ESCAPE HATCH (leave commented): if generation output looks wrong after a
       # FlashInfer autotune cache load on a newer nightly, uncomment to disable
       # the persistent cache (reverts to re-tuning every boot) and report upstream.
@@ -690,12 +673,12 @@ services:
       retries: 120
       start_period: 3600s
     command: >
-      unsloth/Qwen3.6-35B-A3B-NVFP4-Fast
+      nvidia/Qwen3.6-35B-A3B-NVFP4
       --served-model-name qwen3.6-35b-a3b
       --host 0.0.0.0
       --port 8000
       --dtype auto
-      --quantization compressed-tensors
+      --quantization modelopt
       --kv-cache-dtype fp8
       --tensor-parallel-size 1
       --gpu-memory-utilization 0.4
@@ -708,14 +691,14 @@ services:
       --mamba-ssm-cache-dtype float32
       --max-cudagraph-capture-size 256
       --attention-backend flashinfer
-      --moe-backend flashinfer_b12x
+      --moe-backend marlin
       --uvicorn-log-level warning
       --trust-remote-code
       --enable-auto-tool-choice
       --tool-call-parser qwen3_xml
       --reasoning-parser qwen3
       --enable-prefix-caching
-      --speculative-config '{"method":"mtp","num_speculative_tokens":2,"moe_backend":"triton"}'
+      --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'
       --default-chat-template-kwargs '{"preserve_thinking":true}'
       --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
     # ---------------------------------------------------------------------------
@@ -726,12 +709,12 @@ services:
     # slower at *inference* time) boot.
     # ---------------------------------------------------------------------------
     # command: >
-    #   unsloth/Qwen3.6-35B-A3B-NVFP4-Fast
+    #   nvidia/Qwen3.6-35B-A3B-NVFP4
     #   --served-model-name qwen3.6-35b-a3b
     #   --host 0.0.0.0
     #   --port 8000
     #   --dtype auto
-    #   --quantization compressed-tensors
+    #   --quantization modelopt
     #   --kv-cache-dtype fp8
     #   --tensor-parallel-size 1
     #   --gpu-memory-utilization 0.4
@@ -744,14 +727,14 @@ services:
     #   --mamba-ssm-cache-dtype float32
     #   --enforce-eager
     #   --attention-backend flashinfer
-    #   --moe-backend flashinfer_b12x
+    #   --moe-backend marlin
     #   --uvicorn-log-level warning
     #   --trust-remote-code
     #   --enable-auto-tool-choice
     #   --tool-call-parser qwen3_xml
     #   --reasoning-parser qwen3
     #   --enable-prefix-caching
-    #   --speculative-config '{"method":"mtp","num_speculative_tokens":2,"moe_backend":"triton"}'
+    #   --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'
     #   --default-chat-template-kwargs '{"preserve_thinking":true}'
     #   --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
     restart: unless-stopped
