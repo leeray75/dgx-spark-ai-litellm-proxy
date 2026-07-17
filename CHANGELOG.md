@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.1] - 2026-07-17
+
+### Changed
+
+- **Qwen3.6 checkpoint reverted**: rolled back the v1.4.0 unsloth/compressed-tensors experiment. `qwen3-6-35b-nvfp4-engine` serves `nvidia/Qwen3.6-35B-A3B-NVFP4` (ModelOpt, Marlin backend) again.
+  - `--quantization compressed-tensors` → `modelopt`
+  - `--moe-backend flashinfer_b12x` → `marlin`
+  - `--speculative-config num_speculative_tokens` 2 → 3, restored `moe_backend: triton`
+  - Restored `VLLM_NVFP4_GEMM_BACKEND`, `VLLM_USE_FLASHINFER_MOE_FP4`, `VLLM_FP8_MOE_BACKEND` env vars
+  - The unsloth/compressed-tensors config as it stood right before the revert (including its own crash-loop fix) is preserved in `docker-compose.qwen3.6.yml.unsloth-nvfp4-fast.bak` (untracked, `.gitignore`'d) for reference
+- **Tool call parser round-trip**: briefly changed `qwen3_xml` → `qwen3_coder` and back to `qwen3_xml` — net no-op, kept at the official-NVIDIA-spec value
+
+### Fixed
+
+- **docs/models.md**: model ID and config example were left pointing at the reverted `unsloth/Qwen3.6-35B-A3B-NVFP4-Fast` checkpoint after v1.4.0's revert — updated back to `nvidia/Qwen3.6-35B-A3B-NVFP4` / ModelOpt / Marlin to match the actual running config
+
 ## [1.4.0] - 2026-07-15
 
 ### Changed
