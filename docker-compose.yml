@@ -395,6 +395,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/litellm
       # Encrypt virtual key data at rest — set once, never change after first key is created
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}             # set in .env — openssl rand -hex 32
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       # Langfuse OTEL — consumed by langfuse_otel callback in litellm_config.yaml
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}

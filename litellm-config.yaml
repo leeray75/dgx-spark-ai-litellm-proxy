@@ -2,20 +2,20 @@
 # litellm-config.yaml
 # =============================================================================
 # vLLM is started with --served-model-name qwen3.6-35b-a3b
-# So ALL litellm_params.model references must use: hosted_vllm/qwen3.6-35b-a3b
+# So ALL litellm_params.model references must use: openai/qwen3.6-35b-a3b
 #
 # Model: nvidia/Qwen3.6-35B-A3B-NVFP4
 #   35B MoE (3B activated), NVFP4 quantized
 #   Engine port: 8301
 #   Vision support: no (text-only MoE checkpoint; no vision encoder)
 #   Reasoning parser: qwen3 (required to prevent thinking tokens in output)
-#   max-model-len: 131072 (GB10-tuned; raise to 262144 in vLLM if stable)
+#   max-model-len: 262144 (vLLM --max-model-len; full context window)
 #
 # Changes vs qwen3.6-27b config:
 #   model references: qwen3.6-27b → qwen3.6-35b-a3b
 #   api_base:         qwen3-6-27b-engine → qwen3-6-35b-nvfp4-engine
-#   max_tokens:       262144 → 131072 (matches GB10-tuned --max-model-len)
-#   max_input_tokens: 262144 → 131072
+#   max_tokens:       262144 (matches vLLM --max-model-len)
+#   max_input_tokens: 262144
 #   supports_vision:  true → false (NVFP4 MoE checkpoint has no vision encoder)
 #   added: llama-nemotron-embed-vl-1b-v2 embedding model (docker-compose.qwen3.6.yml, port 8302)
 #   removed: claude-sonnet-4-6 / claude-haiku-4-6 Claude Code proxy aliases
@@ -23,49 +23,26 @@
 
 model_list:
 
+  # ── Anthropic passthrough ────────────────────────────────────────────────────
+  # Wildcard: forwards any Claude model ID (including future releases and any
+  # alias Claude Code/Desktop introduces) straight to Anthropic's real API.
+  # Do NOT enumerate individual claude-* model IDs here — that defeats the point.
+  - model_name: "anthropic/*"
+    litellm_params:
+      model: "anthropic/*"
+      api_key: os.environ/ANTHROPIC_API_KEY
+
   # ── Other agents: friendly name ─────────────────────────────────────────────
   # Full context window — use this alias when you want the full 131K
   - model_name: qwen3.6-35b-a3b
     litellm_params:
-      model: hosted_vllm/qwen3.6-35b-a3b
+      model: openai/qwen3.6-35b-a3b
       api_base: http://qwen3-6-35b-nvfp4-engine:8000/v1
-      api_key: "none"
-    model_info:
-      max_tokens: 131072
-      max_input_tokens: 131072
-      max_output_tokens: 16384
-      supports_tool_choice: true
-      supports_function_calling: true
-      supports_vision: false
-      input_cost_per_token: 0.000000015
-      output_cost_per_token: 0.000000035
-
-  # ── Qwen3-Coder-Next (separate compose: docker-compose.yml) ─────────────────
-  - model_name: qwen3-coder-next
-    litellm_params:
-      model: hosted_vllm/qwen3-coder-next
-      api_base: http://qwen3-coder-next-engine:8000/v1
       api_key: "none"
     model_info:
       max_tokens: 262144
       max_input_tokens: 262144
-      max_output_tokens: 16384
-      supports_tool_choice: true
-      supports_function_calling: true
-      supports_vision: false
-      input_cost_per_token: 0.000000015
-      output_cost_per_token: 0.000000035
-
-  # ── Nemotron (separate compose) ─────────────────────────────────────────────
-  - model_name: nemotron-super
-    litellm_params:
-      model: openai/nemotron-super
-      api_base: http://nemotron-engine:8000/v1
-      api_key: "none"
-    model_info:
-      max_tokens: 32768
-      max_input_tokens: 32768
-      max_output_tokens: 8192
+      max_output_tokens: 262144
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: false
@@ -81,7 +58,7 @@ model_list:
   # since the backend is an image-capable VLM embedder, not a text-only model.
   - model_name: llama-nemotron-embed-vl-1b-v2
     litellm_params:
-      model: hosted_vllm/llama-nemotron-embed-vl-1b-v2   # matches --served-model-name
+      model: openai/llama-nemotron-embed-vl-1b-v2   # matches --served-model-name
       api_base: http://nemotron-embed-vl-engine:8000/v1
       api_key: "none"
     model_info:
@@ -98,6 +75,11 @@ litellm_settings:
   request_timeout: 600
   stream_timeout: 300
   num_retries: 3
+  # Catch-all: if a model group fails (after num_retries) and has no specific
+  # entry in `fallbacks`, retry against the local Qwen3.6 engine. Applies to
+  # anthropic/* passthrough failures (Anthropic API down/rate-limited) as well
+  # as any other unmapped model group.
+  default_fallbacks: ["qwen3.6-35b-a3b"]
   turn_off_message_logging: false
   callbacks: ["langfuse_otel"]
 
