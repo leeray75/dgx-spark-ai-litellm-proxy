@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.1] - 2026-07-19
+
+### Fixed
+
+- **Embedding 400 error**: LiteLLM was forwarding `encoding_format: null` on every `/v1/embeddings` call that didn't explicitly set it (the default for any OpenAI-compatible client that doesn't pass it). vLLM's embeddings endpoint has a strict validator that rejects `null` (`"float"`/`"base64"`/`"bytes"`/`"bytes_only"` only), causing every such request to fail with `litellm.BadRequestError: ... encoding_format ... Input should be 'float', 'base64', 'bytes' or 'bytes_only'`. Pinned `encoding_format: "float"` as a static param on the `nemotron-3-embed-1b-nvfp4` entry in `litellm-config.yaml` so a valid value is always forwarded. Verified against the live proxy with both a short string and a full document (`CLAUDE.md`, 3,263 tokens).
+- **Stale Nemotron-3-Super-120B context length**: the real `--max-model-len` in `docker-compose.nemotron.yml` is `262144`, but that file's own header comment said "128K context", `CLAUDE.md` said "32K context", and `docs/models.md`/`docs/architecture.md` said "128K tokens" in four places — all now corrected to 262K.
+- **Stale embedding model name** in `litellm-config.yaml`'s file-header comment — still referenced the replaced `llama-nemotron-embed-vl-1b-v2` model, missed in the v1.5.0 swap.
+
+### Known issue (not fixed, deferred)
+
+- `litellm-config.yaml` is missing `model_list` entries for `qwen3-coder-next` and `nemotron-super` — accidentally dropped as a side effect of the v1.4.1-era commit `875c226` ("Fix litellm config: use openai/ prefix and update token limits"), which did not mention removing them. `CLAUDE.md`/`README.md`/`docs/models.md` still document both as LiteLLM proxy aliases, but only `qwen3.6-35b-a3b` and the embedding model are currently routable through port 4000; the other two engines are only reachable directly on their vLLM ports (8300/8200). Restoring the two entries was deliberately left for a separate change.
+
+## [1.5.0] - 2026-07-18
+
+### Changed
+
+- **Embedding model swap**: Replaced `nvidia/llama-nemotron-embed-vl-1b-v2` (multimodal, ~1.7B params) with `nvidia/Nemotron-3-Embed-1B-NVFP4` (text-only, 1.14B params, NVFP4 quantized) in `docker-compose.qwen3.6.yml`.
+  - Service/container renamed `nemotron-embed-vl-engine` → `nemotron-embed-engine`
+  - `--served-model-name` / LiteLLM alias: `llama-nemotron-embed-vl-1b-v2` → `nemotron-3-embed-1b-nvfp4`
+  - `--max-model-len` 10240 → 4096 (matches NVIDIA's official deployment example); added `--max-num-batched-tokens 4096` and `--max-cudagraph-capture-size 4096`
+  - Removed `--trust-remote-code` (not required by this checkpoint)
+  - **Breaking**: drops image/multimodal embedding support — the new model is text-only
+  - **Breaking**: callers must now manually prefix input with `"query:"` or `"passage:"` (asymmetric embedding); the old model needed no prefix
+  - Requires vLLM 0.25.0+ (0.23.x/0.24.x are explicitly broken per the model card); the `:nightly` image already in use satisfies this
+  - Updated `litellm-config.yaml`, `CLAUDE.md`, `README.md`, and `docs/{setup,troubleshooting,architecture,agents,models}.md` to match
+
 ## [1.4.1] - 2026-07-17
 
 ### Changed

@@ -17,7 +17,7 @@
 #   max_tokens:       262144 (matches vLLM --max-model-len)
 #   max_input_tokens: 262144
 #   supports_vision:  true → false (NVFP4 MoE checkpoint has no vision encoder)
-#   added: llama-nemotron-embed-vl-1b-v2 embedding model (docker-compose.qwen3.6.yml, port 8302)
+#   added: nemotron-3-embed-1b-nvfp4 embedding model (docker-compose.qwen3.6.yml, port 8302)
 #   removed: claude-sonnet-4-6 / claude-haiku-4-6 Claude Code proxy aliases
 # =============================================================================
 
@@ -49,23 +49,31 @@ model_list:
       input_cost_per_token: 0.000000015
       output_cost_per_token: 0.000000035
 
-  # ── Embedding: nvidia/llama-nemotron-embed-vl-1b-v2 ─────────────────────────
-  # Multimodal (text/image/image+text) embedding model, 2048-dim output.
+  # ── Embedding: nvidia/Nemotron-3-Embed-1B-NVFP4 ──────────────────────────────
+  # Text-only embedding model, 2048-dim output, NVFP4 quantized.
   # Runs alongside the chat engine (docker-compose.qwen3.6.yml, port 8302) —
   # small enough not to need exclusive GPU access like the main chat models.
-  # Call via POST /v1/embeddings. For text: {"input": "query text"}.
-  # For image/image+text, pass OpenAI-style content parts (image_url + text)
-  # since the backend is an image-capable VLM embedder, not a text-only model.
-  - model_name: llama-nemotron-embed-vl-1b-v2
+  # Call via POST /v1/embeddings, e.g. {"input": "query: some text"}.
+  # Callers MUST manually prefix input with "query:" or "passage:" — this
+  # model uses asymmetric query/passage embedding (no vision support, unlike
+  # the llama-nemotron-embed-vl-1b-v2 model it replaces).
+  - model_name: nemotron-3-embed-1b-nvfp4
     litellm_params:
-      model: openai/llama-nemotron-embed-vl-1b-v2   # matches --served-model-name
-      api_base: http://nemotron-embed-vl-engine:8000/v1
+      model: openai/nemotron-3-embed-1b-nvfp4   # matches --served-model-name
+      api_base: http://nemotron-embed-engine:8000/v1
       api_key: "none"
+      # Pinned default: when the caller omits encoding_format, LiteLLM
+      # forwards it as a literal `null` rather than omitting the field.
+      # vLLM's embeddings endpoint has a strict pydantic validator that
+      # rejects null (only "float"/"base64"/"bytes"/"bytes_only" are
+      # accepted), causing every unprefixed-encoding_format request to fail
+      # with a 400. Pinning it here forces a valid value on every call.
+      encoding_format: "float"
     model_info:
       mode: embedding
-      max_input_tokens: 10240                            # image+text combined limit
+      max_input_tokens: 4096                             # matches --max-model-len
       output_vector_size: 2048
-      supports_vision: true
+      supports_vision: false
       input_cost_per_token: 0.000000015
 
 litellm_settings:

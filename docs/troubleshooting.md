@@ -18,7 +18,7 @@ The initial model loading can take 10-60 minutes (Qwen3.6 first boot includes Fl
 ```bash
 # Check container logs
 docker compose logs -f qwen3-6-35b-nvfp4-engine
-docker compose logs -f nemotron-embed-vl-engine
+docker compose logs -f nemotron-embed-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine
 
@@ -314,7 +314,7 @@ docker compose logs -f
 
 # Specific service
 docker compose logs -f qwen3-6-35b-nvfp4-engine
-docker compose logs -f nemotron-embed-vl-engine
+docker compose logs -f nemotron-embed-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine
 docker compose logs -f litellm
@@ -339,14 +339,14 @@ docker compose ps -a
 
 # Check network connectivity
 docker compose exec litellm ping -c 3 qwen3-6-35b-nvfp4-engine
-docker compose exec litellm ping -c 3 nemotron-embed-vl-engine
+docker compose exec litellm ping -c 3 nemotron-embed-engine
 docker compose exec litellm ping -c 3 qwen3-coder-next-engine
 docker compose exec litellm ping -c 3 langfuse
 
 # Inspect container details
 docker compose inspect litellm
 docker compose inspect qwen3-6-35b-nvfp4-engine
-docker compose inspect nemotron-embed-vl-engine
+docker compose inspect nemotron-embed-engine
 
 # Execute commands in container
 docker compose exec litellm cat /app/config.yaml

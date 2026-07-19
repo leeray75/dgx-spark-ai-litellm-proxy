@@ -318,7 +318,7 @@ OpenWebUI is a self-hosted web interface for interacting with LLMs.
 | `qwen3.6-35b-a3b` | Direct access to Qwen3.6 model | Qwen3.6-35B-A3B-NVFP4 |
 | `qwen3-coder-next` | Direct access to Qwen3-Coder model | Qwen3-Coder-Next-FP8 |
 | `nemotron-super` | Direct access to Nemotron model | Nemotron-3-Super-120B |
-| `llama-nemotron-embed-vl-1b-v2` | Multimodal embeddings (2048-dim) | Embedding engine |
+| `nemotron-3-embed-1b-nvfp4` | Text embeddings (2048-dim, NVFP4) | Embedding engine |
 
 ### Using Different Models in Your Code
 
@@ -328,7 +328,7 @@ models = {
     'main': 'qwen3.6-35b-a3b',
     'qwen': 'qwen3-coder-next',
     'nemotron': 'nemotron-super',
-    'embed': 'llama-nemotron-embed-vl-1b-v2'
+    'embed': 'nemotron-3-embed-1b-nvfp4'
 }
 
 response = client.chat.completions.create(
@@ -369,8 +369,8 @@ curl http://localhost:4000/v1/embeddings \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-your-litellm-master-key" \
   -d '{
-    "model": "llama-nemotron-embed-vl-1b-v2",
-    "input": "Hello world"
+    "model": "nemotron-3-embed-1b-nvfp4",
+    "input": "query: Hello world"
   }'
 ```
 

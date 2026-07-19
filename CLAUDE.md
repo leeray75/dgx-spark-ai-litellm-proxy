@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An OpenAI-compatible LLM proxy stack running on an **NVIDIA DGX Spark (Blackwell GB10)** workstation with 128GB unified memory. It wraps local vLLM inference engines behind a LiteLLM proxy with full Langfuse v3 observability (tracing, cost tracking, analytics).
 
-The three selectable chat models cannot run simultaneously — only one chat inference engine is active at a time due to GPU memory constraints. The `llama-nemotron-embed-vl-1b-v2` embedding engine is small enough (~1.7B params) to run alongside whichever chat engine is active; it's currently wired into `docker-compose.qwen3.6.yml` only.
+The three selectable chat models cannot run simultaneously — only one chat inference engine is active at a time due to GPU memory constraints. The `nemotron-3-embed-1b-nvfp4` embedding engine is small enough (~1.14B params) to run alongside whichever chat engine is active; it's currently wired into `docker-compose.qwen3.6.yml` only.
 
 ## Stack Management
 
@@ -127,8 +127,8 @@ Each compose file pins a different vLLM image — do not swap these:
 |-------|---------|---------|
 | `qwen3.6-35b-a3b` | Qwen3.6-35B-A3B-NVFP4 | Direct access (131K context) |
 | `qwen3-coder-next` | Qwen3-Coder-Next-FP8 | 80B MoE coder (262K context) |
-| `nemotron-super` | Nemotron-3-Super-120B | General reasoning (32K context) |
-| `llama-nemotron-embed-vl-1b-v2` | llama-nemotron-embed-vl-1b-v2 | Multimodal (text/image) embedding, 2048-dim (`/v1/embeddings`) |
+| `nemotron-super` | Nemotron-3-Super-120B | General reasoning (262K context) |
+| `nemotron-3-embed-1b-nvfp4` | Nemotron-3-Embed-1B-NVFP4 | Text-only embedding, 2048-dim, NVFP4 (`/v1/embeddings`); requires manual `query:`/`passage:` input prefix |
 
 > **Note:** The `anthropic/*` wildcard passthrough (added v1.4.0) routes all Claude model IDs — including future releases and any alias Claude Code/Desktop introduces — directly to Anthropic's real API via the proxy. A `default_fallbacks` entry sends failed requests to the local Qwen3.6 engine. This replaces the older approach of using individual `claude-sonnet-4-6` / `claude-haiku-4-6` proxy aliases (removed in v1.3.0).
 
@@ -184,7 +184,7 @@ curl http://localhost:4000/v1/chat/completions \
 curl http://localhost:4000/v1/embeddings \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -d '{"model": "llama-nemotron-embed-vl-1b-v2", "input": "Hello"}'
+  -d '{"model": "nemotron-3-embed-1b-nvfp4", "input": "query: Hello"}'
 ```
 
 Engine health check (skip LiteLLM):

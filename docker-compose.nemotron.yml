@@ -5,7 +5,7 @@
 # Hardware: NVIDIA DGX Spark workstation with GB10 Superchip (128 GB unified memory)
 #           Based on NVIDIA Blackwell architecture
 #
-#         (120B total, 12B active, NVFP4 quantization, 128K context)
+#         (120B total, 12B active, NVFP4 quantization, 262K context)
 #
 # Architecture notes:
 #   - MoE architecture with 512 experts, 12 active per forward pass
