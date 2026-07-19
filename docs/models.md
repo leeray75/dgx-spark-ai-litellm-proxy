@@ -83,7 +83,7 @@ This guide compares the three supported LLMs for the **NVIDIA DGX Spark (Blackwe
 | **Active Parameters** | 12B (MoE) |
 | **Architecture** | MoE with 512 experts |
 | **Quantization** | NVFP4 (NVIDIA 4-bit) |
-| **Context Window** | 128K tokens |
+| **Context Window** | 262K tokens |
 | **VRAM Required** | ~80 GB |
 | **Model ID** | `nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4` |
 | **vLLM Image** | `vllm/vllm-openai:nightly` |
@@ -107,34 +107,34 @@ This guide compares the three supported LLMs for the **NVIDIA DGX Spark (Blackwe
 
 ---
 
-### llama-nemotron-embed-vl-1b-v2 (Embedding Model)
+### nemotron-3-embed-1b-nvfp4 (Embedding Model)
 
 | Attribute | Value |
 |-----------|-------|
-| **Model Name** | llama-nemotron-embed-vl-1b-v2 |
+| **Model Name** | nemotron-3-embed-1b-nvfp4 |
 | **Provider** | NVIDIA |
-| **Total Parameters** | ~1.7B |
-| **Architecture** | Llama 3.2 1B LM + SigLip2 400M vision encoder |
+| **Total Parameters** | 1.14B |
+| **Architecture** | Pruned Ministral-3-3B-Instruct-2512-based encoder |
 | **Output Dimension** | 2048 |
-| **Context Window** | 10240 tokens (image+text combined) |
-| **VRAM Required** | ~4-6 GB |
-| **Model ID** | `nvidia/llama-nemotron-embed-vl-1b-v2` |
-| **vLLM Image** | `vllm/vllm-openai:nightly` |
+| **Context Window** | 4096 tokens (configured; model supports up to 32768) |
+| **VRAM Required** | ~1-2 GB (NVFP4 quantized) |
+| **Model ID** | `nvidia/Nemotron-3-Embed-1B-NVFP4` |
+| **vLLM Image** | `vllm/vllm-openai:nightly` (requires vLLM 0.25.0+; 0.23.x/0.24.x broken) |
 | **Port** | 8302 (Qwen3.6 stack only) |
 
 #### Key Features
 
-- **Multimodal**: Embeds text, images, and image+text pairs in shared space
+- **Text-only**: No vision encoder — replaces the multimodal llama-nemotron-embed-vl-1b-v2
+- **NVFP4 Quantized**: Weights and activations of linear layers quantized via post-training QAD
+- **Asymmetric Embedding**: Requires manual `query:`/`passage:` input prefixing
 - **Concurrent**: Small enough to run alongside chat engine on same GPU
 - **RAG-Ready**: 2048-dim vectors for document retrieval workflows
-- **Built with Llama**: Uses Llama 3.2 1B language model + SigLip2 400M vision encoder
 
 #### Use Cases
 
 - Vector database embeddings
 - Document retrieval and RAG
-- Image-text similarity search
-- Multimodal semantic search
+- Text semantic search
 
 ---
 
@@ -142,12 +142,12 @@ This guide compares the three supported LLMs for the **NVIDIA DGX Spark (Blackwe
 
 | Feature | Qwen3.6-35B-A3B-NVFP4 | Qwen3-Coder-Next-FP8 | Nemotron-3-Super-120B | Embedding |
 |---------|----------------------|---------------------|----------------------|-----------|
-| **Context** | 262K (131K default) | 262K | 128K | 10240 |
-| **VRAM (weights)** | ~26 GB | ~118 GB | ~80 GB | ~4-6 GB |
-| **Model Type** | 35B MoE (3B active) | 80B MoE (3B active) | 120B MoE (12B active) | 1.7B VLM |
-| **Quantization** | NVFP4 | FP8 | NVFP4 | N/A |
+| **Context** | 262K (131K default) | 262K | 262K | 4096 |
+| **VRAM (weights)** | ~26 GB | ~118 GB | ~80 GB | ~1-2 GB |
+| **Model Type** | 35B MoE (3B active) | 80B MoE (3B active) | 120B MoE (12B active) | 1.14B text encoder |
+| **Quantization** | NVFP4 | FP8 | NVFP4 | NVFP4 |
 | **Output Format** | Standard JSON | Standard JSON | Reasoning blocks | 2048-dim vector |
-| **Vision** | ❌ No | ❌ No | ❌ No | ✅ Yes (embedder) |
+| **Vision** | ❌ No | ❌ No | ❌ No | ❌ No |
 | **Tool Calling** | Native (qwen3_xml) | Native (qwen3_coder) | Requires parser | N/A |
 | **Best For** | Coding (Cline) | Coding tasks | General reasoning | Embeddings/RAG |
 | **Runs Concurrently** | ❌ | ❌ | ❌ | ✅ Yes |
@@ -228,15 +228,16 @@ nemotron-engine:
 ### Embedding Model (docker-compose.qwen3.6.yml)
 
 ```yaml
-nemotron-embed-vl-engine:
+nemotron-embed-engine:
   image: vllm/vllm-openai:nightly
   environment:
     HF_TOKEN: ${HF_TOKEN}
   command:
-    --model nvidia/llama-nemotron-embed-vl-1b-v2
-    --served-model-name llama-nemotron-embed-vl-1b-v2
-    --trust-remote-code
-    --max-model-len 10240
+    --model nvidia/Nemotron-3-Embed-1B-NVFP4
+    --served-model-name nemotron-3-embed-1b-nvfp4
+    --max-model-len 4096
+    --max-num-batched-tokens 4096
+    --max-cudagraph-capture-size 4096
     --gpu-memory-utilization 0.1
 ```
 
@@ -263,13 +264,13 @@ nemotron-embed-vl-engine:
 
 - You need **strong reasoning** capabilities
 - You're doing **general problem solving**
-- You're working with **128K context** (sufficient for most tasks)
+- You're working with **262K context** (matches the full vLLM `--max-model-len`)
 - You want **NVIDIA's best model** for Blackwell GPUs
 
 ### Choose Embedding Model if:
 
 - You need **vector embeddings** for RAG/document retrieval
-- You need **multimodal** (text + image) embeddings
+- Your embeddings are **text-only** (no image/multimodal support)
 - You need embeddings that run **concurrently** with a chat model
 
 ---
@@ -327,4 +328,4 @@ curl http://localhost:4000/v1/chat/completions \
 # Text embedding (via LiteLLM proxy)
 curl http://localhost:4000/v1/embeddings \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -d '{"model": "llama-nemotron-embed-vl-1b-v2", "input": "Hello world"}'
+  -d '{"model": "nemotron-3-embed-1b-nvfp4", "input": "query: Hello world"}'

@@ -7,7 +7,7 @@ An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** 
 ## Features
 
 - **Triple Model Support**: Switch between Qwen3.6-35B-A3B-NVFP4 (default), Qwen3-Coder-Next-FP8 (80B), and Nemotron-3-Super-120B (NVFP4)
-- **Multimodal Embedding**: `llama-nemotron-embed-vl-1b-v2` for text/image embeddings (2048-dim)
+- **Text Embedding**: `nemotron-3-embed-1b-nvfp4` (NVFP4-quantized) for text embeddings (2048-dim)
 - **OpenAI-Compatible API**: Drop-in replacement for OpenAI API calls
 - **Langfuse v3 Observability**: Full traceability, cost tracking, and analytics
 - **vLLM Inference**: High-performance GPU inference with FlashAttention-3 support
@@ -185,11 +185,11 @@ curl http://localhost:4000/v1/chat/completions \
 ### Embedding API
 
 ```bash
-# Text embedding
+# Text embedding — inputs must be prefixed with "query:" or "passage:"
 curl http://localhost:4000/v1/embeddings \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -d '{"model": "llama-nemotron-embed-vl-1b-v2", "input": "Hello"}'
+  -d '{"model": "nemotron-3-embed-1b-nvfp4", "input": "query: Hello"}'
 ```
 
 ## Stopping Services

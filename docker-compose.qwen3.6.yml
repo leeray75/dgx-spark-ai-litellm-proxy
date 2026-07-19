@@ -315,7 +315,7 @@
 #   3000  — Langfuse UI + API
 #   4000  — LiteLLM Proxy (OpenAI-compatible) + UI at /ui
 #   8301  — vLLM engine (direct; prefer routing via LiteLLM on 4000)
-#   8302  — vLLM embedding engine (nvidia/llama-nemotron-embed-vl-1b-v2, direct)
+#   8302  — vLLM embedding engine (nvidia/Nemotron-3-Embed-1B-NVFP4, direct)
 #   9090  — MinIO S3 API
 #   9091  — MinIO console UI
 #
@@ -740,21 +740,27 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # vLLM Embedding Engine — nvidia/llama-nemotron-embed-vl-1b-v2
-  # Multimodal (text/image/image+text) embedding model, ~1.7B params (Llama 3.2
-  # 1B LM + SigLip2 400M vision encoder), 2048-dim output. Small enough to run
-  # alongside the 35B chat engine on the same GB10 — unlike the three main chat
-  # models, it does NOT need exclusive GPU access.
-  # Source: https://huggingface.co/nvidia/llama-nemotron-embed-vl-1b-v2
-  # Requires vLLM >=0.17.0 (registers the LlamaNemotronVLModel architecture);
-  # the :nightly image already in use here satisfies that.
-  # --max-model-len 10240 covers the model's largest supported modality
-  # (image+text); --trust-remote-code is required per the model card.
+  # vLLM Embedding Engine — nvidia/Nemotron-3-Embed-1B-NVFP4
+  # Text-only embedding model (1.14B params, pruned Ministral-3-3B-based
+  # encoder), 2048-dim output, NVFP4 quantized (weights+activations of linear
+  # layers). Small enough to run alongside the 35B chat engine on the same
+  # GB10 — unlike the three main chat models, it does NOT need exclusive GPU
+  # access.
+  # Source: https://huggingface.co/nvidia/Nemotron-3-Embed-1B-NVFP4
+  # Replaces llama-nemotron-embed-vl-1b-v2 (v1.5.0) — drops image/multimodal
+  # embedding support (this model is text-only) in exchange for a newer-gen
+  # text encoder and 3x the max context (32,768 vs 10,240 tokens).
+  # Requires vLLM 0.25.0 (0.23.x/0.24.x are explicitly broken per the model
+  # card); the :nightly image already in use here satisfies that.
+  # Callers must manually prefix inputs with "query:" or "passage:" — this
+  # model uses asymmetric query/passage embedding, unlike the old VL model.
+  # --max-model-len/--max-num-batched-tokens/--max-cudagraph-capture-size
+  # 4096 matches NVIDIA's official deployment example.
   # ---------------------------------------------------------------------------
-  nemotron-embed-vl-engine:
+  nemotron-embed-engine:
     image: vllm/vllm-openai:nightly
     platform: linux/arm64
-    container_name: nemotron-embed-vl-engine
+    container_name: nemotron-embed-engine
     networks:
       - ai-bridge
     ports:
@@ -779,12 +785,13 @@ services:
       retries: 60
       start_period: 900s
     command: >
-      nvidia/llama-nemotron-embed-vl-1b-v2
-      --served-model-name llama-nemotron-embed-vl-1b-v2
+      nvidia/Nemotron-3-Embed-1B-NVFP4
+      --served-model-name nemotron-3-embed-1b-nvfp4
       --host 0.0.0.0
       --port 8000
-      --trust-remote-code
-      --max-model-len 10240
+      --max-model-len 4096
+      --max-num-batched-tokens 4096
+      --max-cudagraph-capture-size 4096
       --gpu-memory-utilization 0.1
     restart: unless-stopped
 
@@ -821,7 +828,7 @@ services:
         condition: service_healthy
       qwen3-6-35b-nvfp4-engine:
         condition: service_healthy
-      nemotron-embed-vl-engine:
+      nemotron-embed-engine:
         condition: service_healthy
       langfuse-web:
         condition: service_started

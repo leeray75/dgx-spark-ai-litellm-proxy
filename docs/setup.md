@@ -124,7 +124,7 @@ docker compose logs -f
 
 # Check specific service logs
 docker compose logs -f qwen3-6-35b-nvfp4-engine   # For Qwen3.6
-docker compose logs -f nemotron-embed-vl-engine    # For Embedding (Qwen3.6 stack)
+docker compose logs -f nemotron-embed-engine    # For Embedding (Qwen3.6 stack)
 docker compose logs -f qwen3-coder-next-engine     # For Qwen3-Coder
 docker compose logs -f nemotron-engine             # For Nemotron
 ```
@@ -196,8 +196,8 @@ curl http://localhost:4000/v1/embeddings \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -d '{
-    "model": "llama-nemotron-embed-vl-1b-v2",
-    "input": "Hello world"
+    "model": "nemotron-3-embed-1b-nvfp4",
+    "input": "query: Hello world"
   }'
 ```
 

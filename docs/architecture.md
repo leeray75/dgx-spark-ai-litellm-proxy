@@ -75,7 +75,7 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 | Service | Image | Port | Model | Quantization |
 |---------|-------|------|-------|--------------|
 | Qwen3.6 Engine | `vllm/vllm-openai:nightly` | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 |
-| Embedding Engine | `vllm/vllm-openai:nightly` | 8302 | llama-nemotron-embed-vl-1b-v2 | N/A |
+| Embedding Engine | `vllm/vllm-openai:nightly` | 8302 | nemotron-3-embed-1b-nvfp4 | NVFP4 |
 | Qwen3-Coder Engine | `vllm/vllm-openai:v0.19.1-cu130` | 8300 | Qwen3-Coder-Next-FP8 | FP8 |
 | Nemotron Engine | `vllm/vllm-openai:v0.18.1-cu130` | 8200 | Nemotron-3-Super-120B | NVFP4 |
 
@@ -138,13 +138,13 @@ All services connect via a Docker bridge network called `ai-bridge`:
 - **Reasoning**: Native thinking tokens with `--reasoning-parser qwen3`
 - **Special**: `--tool-call-parser qwen3_xml`, `--load-format fastsafetensors`
 
-### llama-nemotron-embed-vl-1b-v2 (Embedding)
+### nemotron-3-embed-1b-nvfp4 (Embedding)
 
-- **Size**: ~1.7B parameters (Llama 3.2 1B LM + SigLip2 400M vision encoder)
+- **Size**: 1.14B parameters (pruned Ministral-3-3B-based encoder)
 - **Output**: 2048-dimensional vectors
-- **Context**: 10240 tokens (image+text combined)
-- **GPU Memory**: ~4-6GB
-- **Vision Support**: Yes (multimodal embedder)
+- **Context**: 4096 tokens (configured; model supports up to 32768)
+- **GPU Memory**: ~1-2GB (NVFP4 quantized)
+- **Vision Support**: No (text-only; requires manual `query:`/`passage:` input prefix)
 - **Concurrent**: Runs alongside chat engine on same GPU
 
 ### Qwen3-Coder-Next-FP8
@@ -161,7 +161,7 @@ All services connect via a Docker bridge network called `ai-bridge`:
 - **Size**: 120B total parameters, 12B active
 - **Architecture**: MoE with 512 experts
 - **Quantization**: NVFP4 (NVIDIA 4-bit)
-- **Context**: 128K tokens
+- **Context**: 262K tokens
 - **GPU Memory**: ~80GB required
 - **Special**: Requires reasoning parser plugin
 
