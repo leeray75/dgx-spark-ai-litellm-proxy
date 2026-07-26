@@ -40,3 +40,7 @@ qdrant-storage/
 .env.backup
 *.bak
 .clinerules
+
+# Python bytecode cache
+__pycache__/
+*.pyc
