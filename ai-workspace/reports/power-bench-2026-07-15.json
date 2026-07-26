@@ -1,0 +1,68 @@
+{
+  "bench_start": "2026-07-15T13:08:24.044580",
+  "bench_end": "2026-07-15T13:19:01.231580",
+  "model": "qwen3.6-35b-a3b",
+  "api_key": "sk-REDACTED",
+  "base_url": "http://localhost:4000/v1",
+  "power_summary": {
+    "duration_seconds": 633.54,
+    "sample_count": 1084,
+    "power_draw_mean_w": 8.33,
+    "power_draw_max_w": 10.97,
+    "power_draw_min_w": 6.07,
+    "power_draw_std_w": 1.13,
+    "total_energy_wh": 1.2541,
+    "avg_gpu_utilization": 66.15,
+    "avg_memory_mb": 0.0,
+    "avg_temperature": 40.51,
+    "status": "success",
+    "model": "qwen3.6-35b-a3b"
+  },
+  "prompt_results": [
+    {
+      "label": "complex_reasoning",
+      "description": "Multi-step logical reasoning with constraints",
+      "status": "success",
+      "time_to_first_token": null,
+      "total_time": 115.398,
+      "tokens_generated": 1,
+      "response_length": 0
+    },
+    {
+      "label": "long_context_analysis",
+      "description": "Process and analyze a lengthy technical document",
+      "status": "success",
+      "time_to_first_token": null,
+      "total_time": 193.157,
+      "tokens_generated": 3796.0,
+      "response_length": 4936
+    },
+    {
+      "label": "multi_turn_conversation",
+      "description": "Simulated multi-turn conversation requiring tool calls and context retention",
+      "status": "success",
+      "time_to_first_token": null,
+      "total_time": 91.682,
+      "tokens_generated": 329.0,
+      "response_length": 428
+    },
+    {
+      "label": "code_generation",
+      "description": "Generate production-ready code for a complex system",
+      "status": "success",
+      "time_to_first_token": null,
+      "total_time": 88.431,
+      "tokens_generated": 7766.0,
+      "response_length": 10097
+    },
+    {
+      "label": "creative_task",
+      "description": "Generate creative technical content with specific constraints",
+      "status": "success",
+      "time_to_first_token": null,
+      "total_time": 103.519,
+      "tokens_generated": 5106.0,
+      "response_length": 6639
+    }
+  ]
+}
