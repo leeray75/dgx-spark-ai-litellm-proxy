@@ -163,12 +163,15 @@ qwen3-6-35b-nvfp4-engine:
   image: vllm/vllm-openai:nightly
   environment:
     HF_TOKEN: ${HF_TOKEN}
+    TRITON_CACHE_DIR: /root/.triton/cache
     FLASHINFER_DISABLE_VERSION_CHECK: "1"
     CUTE_DSL_ARCH: sm_121a
     VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
     VLLM_USE_FLASHINFER_MOE_FP4: "0"
     VLLM_FP8_MOE_BACKEND: flashinfer_cutlass
     VLLM_NVFP4_GEMM_BACKEND: marlin
+  volumes:
+    - vllm-triton-cache:/root/.triton/cache   # persists Triton's JIT kernel cache across restarts
   command:
     --model nvidia/Qwen3.6-35B-A3B-NVFP4
     --served-model-name qwen3.6-35b-a3b
@@ -181,10 +184,18 @@ qwen3-6-35b-nvfp4-engine:
     --max-num-batched-tokens 8192
     --load-format fastsafetensors
     --moe-backend marlin
+    --max-cudagraph-capture-size 256
+    --compilation-config '{"cudagraph_capture_sizes":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,24,32,48,64,96,128,192,256]}'
     --tool-call-parser qwen3_xml
     --reasoning-parser qwen3
-    --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'
+    --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN36_NUM_SPECULATIVE_TOKENS:-3},"moe_backend":"triton"}'
 ```
+
+`--compilation-config`'s `cudagraph_capture_sizes` is densified across 1-16 because that's the effective decode-batch
+range for this engine: `--max-num-seqs 4` combined with MTP's per-sequence verification query length of
+`1 + num_speculative_tokens` (up to 4 at the default of 3) tops out at `4 × 4 = 16`. `QWEN36_NUM_SPECULATIVE_TOKENS`
+(from `.env`, default `3`) is the A/B toggle for the speculative lookahead depth — see `CHANGELOG.md` for the
+acceptance-rate reasoning and benchmarking steps.
 
 ### Qwen3-Coder-Next-FP8 (docker-compose.yml)
 
