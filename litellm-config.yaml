@@ -71,7 +71,7 @@ model_list:
       encoding_format: "float"
     model_info:
       mode: embedding
-      max_input_tokens: 4096                             # matches --max-model-len
+      max_input_tokens: 32768                            # matches --max-model-len
       output_vector_size: 2048
       supports_vision: false
       input_cost_per_token: 0.000000015

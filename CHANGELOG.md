@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Qwen3.6 Triton JIT cache was never actually persisted**: `docs/architecture.md` and the v1.3.0 CHANGELOG entry
+  both claimed a `vllm-triton-cache` volume existed alongside `vllm-compile-cache`/`vllm-flashinfer-cache`, but it
+  was never declared or mounted on `qwen3-6-35b-nvfp4-engine` — only documented. This meant Triton's own on-disk JIT
+  cache (`@triton.jit`/`@triton.autotune`-compiled kernels — `fused_moe_kernel`, `batch_memcpy_kernel`, the
+  `causal_conv1d`/mamba/`eagle_*` kernels) lived at the default in-container path `/root/.triton/cache`, which is
+  wiped every time the container is recreated. `scripts/restart.sh` recreates the container on every run (it only
+  `down`s/`up`s — it does not `docker volume rm` anything), so the "cache-clearing ritual" was re-paying the full
+  Triton JIT compilation tax every restart even though the two *other* vLLM caches were already correctly
+  persisted. This is the most likely explanation for `WARNING [jit_monitor.py:135] Triton kernel JIT compilation
+  during inference: fused_moe_kernel` (and friends) recurring — added `vllm-triton-cache:/root/.triton/cache`
+  (volume + explicit `TRITON_CACHE_DIR` env var) to close the gap, matching the pattern already used for the other
+  two caches.
+
+### Added
+
+- **Widened Qwen3.6 CUDA-graph capture-size list**: added `--compilation-config '{"cudagraph_capture_sizes": [...]}'`
+  with a dense list covering 1-16 (then the same wider spacing up to the existing 256 ceiling). Rationale: single
+  concurrent-sequence chat traffic ranges 1-4 (`--max-num-seqs 4`), and MTP speculative verification steps have a
+  per-sequence query length of `1 + num_speculative_tokens`, so the effective decode-batch dimension actually seen
+  in production ranges up to `4 × 4 = 16` — a range vLLM's default inferred capture-size list apparently doesn't
+  densely cover, based on the `jit_monitor.py` warnings showing these kernels compiling mid-inference rather than
+  only once during startup warmup. `--max-cudagraph-capture-size 256` is left unchanged as a safety ceiling. If this
+  causes startup issues, the fix is to delete the `--compilation-config` line — everything else is unaffected.
+- **`QWEN36_NUM_SPECULATIVE_TOKENS` env var** (`.env`/`.env.sample`, default `3` — **no behavior change** by
+  default): an explicit A/B toggle for the MTP speculative decoding lookahead depth, referenced from
+  `docker-compose.qwen3.6.yml`'s `--speculative-config` as `${QWEN36_NUM_SPECULATIVE_TOKENS:-3}`. Motivation: across
+  observed samples, per-position draft acceptance rate consistently drops off by the 3rd speculative position (e.g.
+  0.895 → 0.745 → 0.600 in good windows, 0.731 → 0.423 → 0.239 in weaker ones), and average draft acceptance sits in
+  the mid-50s%. Reducing lookahead from 3 → 2 tokens trades away the (already low-probability) 3rd-position hits in
+  exchange for not spending decode compute drafting/verifying a token that's frequently rejected — worth testing,
+  but not applied as a silent default change since it lowers the ceiling in the good windows too.
+  - **Note**: v1.4.0 briefly ran with `num_speculative_tokens=2` before v1.4.1 reverted it — but that change was
+    bundled with a full checkpoint/quantization-backend revert (unsloth/compressed-tensors → nvidia/ModelOpt), so it
+    isn't a clean prior A/B result for this specific parameter.
+  - **To benchmark**: run baseline traffic, capture
+    `docker compose -f docker-compose.qwen3.6.yml logs qwen3-6-35b-nvfp4-engine | grep -E "Avg generation throughput|SpecDecoding metrics"`,
+    then set `QWEN36_NUM_SPECULATIVE_TOKENS=2` in `.env`, recreate just that service
+    (`docker compose -f docker-compose.qwen3.6.yml up -d --force-recreate qwen3-6-35b-nvfp4-engine`), and repeat
+    against comparable traffic.
+
 ## [1.5.1] - 2026-07-19
 
 ### Fixed

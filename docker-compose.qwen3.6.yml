@@ -627,8 +627,22 @@ services:
       # and adjust this mount if it prints something other than
       # /root/.cache/flashinfer.
       - vllm-flashinfer-cache:/root/.cache/flashinfer
+      # Persists Triton's own on-disk JIT cache (@triton.jit / @triton.autotune
+      # compiled kernels — fused_moe_kernel, batch_memcpy_kernel, the causal_conv1d
+      # / mamba / eagle_* kernels, etc). This is DISTINCT from vllm-compile-cache
+      # above (torch.compile/Inductor graphs) and from vllm-flashinfer-cache
+      # (FlashInfer's own autotune+workspace). docs/architecture.md and the
+      # v1.3.0 CHANGELOG entry already documented this volume as existing, but it
+      # was never actually declared/mounted — meaning every container recreation
+      # (including scripts/restart.sh, which does NOT delete named volumes, only
+      # `down`/`up`) was silently re-paying the full Triton JIT compilation cost
+      # from a clean /root/.triton/cache, which is very likely why kernels like
+      # fused_moe_kernel show up in jit_monitor.py warnings mid-inference instead
+      # of only once during startup warmup.
+      - vllm-triton-cache:/root/.triton/cache
     environment:
       HF_TOKEN: ${HF_TOKEN}
+      TRITON_CACHE_DIR: /root/.triton/cache
       FLASHINFER_DISABLE_VERSION_CHECK: "1"
       CUTE_DSL_ARCH: sm_121a                # GB10 Blackwell SM architecture, confirmed correct
       VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
@@ -672,6 +686,30 @@ services:
       timeout: 10s
       retries: 120
       start_period: 3600s
+    # ---------------------------------------------------------------------------
+    # --compilation-config: explicit dense CUDA-graph capture-size list for the
+    # low end of the range, added to close a warmup gap: jit_monitor.py was
+    # logging Triton JIT/autotune events (fused_moe_kernel, batch_memcpy_kernel,
+    # eagle_*, causal_conv1d*) DURING inference, meaning vLLM's default inferred
+    # capture-size list wasn't exercising every shape real traffic hits.
+    # Single-stream chat here means 1-4 concurrent sequences (--max-num-seqs 4);
+    # MTP speculative verification steps have query length (1 + num_speculative_
+    # tokens) per sequence, so the effective decode-batch dimension ranges up to
+    # 4 * (1+3) = 16. Values above 16 fall back to the same spacing
+    # --max-cudagraph-capture-size already implied (unchanged ceiling of 256).
+    # If startup fails or takes much longer, remove the --compilation-config line
+    # to restore prior behavior.
+    #
+    # --speculative-config: QWEN36_NUM_SPECULATIVE_TOKENS (.env, default 3 =
+    # current behavior, unchanged) is an A/B toggle. Per-position speculative
+    # acceptance rate consistently drops off by the 3rd draft position, so
+    # num_speculative_tokens=3 spends compute on a draft token that's frequently
+    # rejected. Set to 2 in .env and recreate this service to test whether net
+    # throughput improves — compare `Avg generation throughput` and
+    # `SpecDecoding metrics` log lines before/after:
+    #   docker compose -f docker-compose.qwen3.6.yml logs qwen3-6-35b-nvfp4-engine \
+    #     | grep -E "Avg generation throughput|SpecDecoding metrics"
+    # ---------------------------------------------------------------------------
     command: >
       nvidia/Qwen3.6-35B-A3B-NVFP4
       --served-model-name qwen3.6-35b-a3b
@@ -690,6 +728,7 @@ services:
       --load-format fastsafetensors
       --mamba-ssm-cache-dtype float32
       --max-cudagraph-capture-size 256
+      --compilation-config '{"cudagraph_capture_sizes":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,24,32,48,64,96,128,192,256]}'
       --attention-backend flashinfer
       --moe-backend marlin
       --uvicorn-log-level warning
@@ -698,7 +737,7 @@ services:
       --tool-call-parser qwen3_xml
       --reasoning-parser qwen3
       --enable-prefix-caching
-      --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'
+      --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN36_NUM_SPECULATIVE_TOKENS:-3},"moe_backend":"triton"}'
       --default-chat-template-kwargs '{"preserve_thinking":true}'
       --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
     # ---------------------------------------------------------------------------
@@ -734,7 +773,7 @@ services:
     #   --tool-call-parser qwen3_xml
     #   --reasoning-parser qwen3
     #   --enable-prefix-caching
-    #   --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'
+    #   --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN36_NUM_SPECULATIVE_TOKENS:-3},"moe_backend":"triton"}'
     #   --default-chat-template-kwargs '{"preserve_thinking":true}'
     #   --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
     restart: unless-stopped
@@ -789,8 +828,8 @@ services:
       --served-model-name nemotron-3-embed-1b-nvfp4
       --host 0.0.0.0
       --port 8000
-      --max-model-len 4096
-      --max-num-batched-tokens 4096
+      --max-model-len 32768
+      --max-num-batched-tokens 32768
       --max-cudagraph-capture-size 4096
       --gpu-memory-utilization 0.1
     restart: unless-stopped
@@ -859,4 +898,5 @@ volumes:
   langfuse-redis-data:
   vllm-compile-cache:      # persists /root/.cache/vllm (torch.compile + FlashInfer autotune configs)
   vllm-flashinfer-cache:   # persists /root/.cache/flashinfer (FlashInfer JIT kernel workspace)
+  vllm-triton-cache:       # persists /root/.triton/cache (Triton kernel JIT cache)
   vllm-embed-compile-cache: # persists /root/.cache/vllm for the embedding engine (separate model/config hash)
