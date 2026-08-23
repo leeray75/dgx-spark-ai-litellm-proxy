@@ -1,24 +1,26 @@
 # =============================================================================
 # litellm-config.yaml
 # =============================================================================
-# vLLM is started with --served-model-name qwen3.6-35b-a3b
-# So ALL litellm_params.model references must use: openai/qwen3.6-35b-a3b
+# This file is SHARED and mounted read-only by every compose stack
+# (docker-compose.qwen3.8.yml, docker-compose.qwen3.6.yml, docker-compose.yml,
+# docker-compose.nemotron.yml). Only one chat engine runs at a time, so
+# whichever model_list entry's api_base isn't currently up will just fail
+# health checks / requests until that stack is started — this is the existing
+# design, not something new here.
 #
-# Model: nvidia/Qwen3.6-35B-A3B-NVFP4
-#   35B MoE (3B activated), NVFP4 quantized
+# qwen3.8-27b is the new PRIMARY/DEFAULT entry (docker-compose.qwen3.8.yml,
+# port 8301, --served-model-name qwen3.8-27b → openai/qwen3.8-27b).
+# qwen3.6-35b-a3b is KEPT (not deleted) for rollback — if you ever bring
+# docker-compose.qwen3.6.yml back up, its alias still works.
+#
+# Model: unsloth/Qwen3.8-27B-NVFP4
+#   27B dense (NOT MoE), NVFP4/FP8 compressed-tensors quantized
 #   Engine port: 8301
-#   Vision support: no (text-only MoE checkpoint; no vision encoder)
+#   Vision support: yes (has a vision encoder, unlike qwen3.6's text-only MoE)
 #   Reasoning parser: qwen3 (required to prevent thinking tokens in output)
+#   Tool-call parser: qwen3_xml — CARRIED BY ANALOGY from qwen3.6, unverified
+#     for this model. See docker-compose.qwen3.8.yml's PROVENANCE header.
 #   max-model-len: 262144 (vLLM --max-model-len; full context window)
-#
-# Changes vs qwen3.6-27b config:
-#   model references: qwen3.6-27b → qwen3.6-35b-a3b
-#   api_base:         qwen3-6-27b-engine → qwen3-6-35b-nvfp4-engine
-#   max_tokens:       262144 (matches vLLM --max-model-len)
-#   max_input_tokens: 262144
-#   supports_vision:  true → false (NVFP4 MoE checkpoint has no vision encoder)
-#   added: nemotron-3-embed-1b-nvfp4 embedding model (docker-compose.qwen3.6.yml, port 8302)
-#   removed: claude-sonnet-4-6 / claude-haiku-4-6 Claude Code proxy aliases
 # =============================================================================
 
 model_list:
@@ -32,8 +34,26 @@ model_list:
       model: "anthropic/*"
       api_key: os.environ/ANTHROPIC_API_KEY
 
-  # ── Other agents: friendly name ─────────────────────────────────────────────
-  # Full context window — use this alias when you want the full 131K
+  # ── Primary chat model: unsloth/Qwen3.8-27B-NVFP4 ───────────────────────────
+  # docker-compose.qwen3.8.yml, port 8301. Full 262K context window.
+  - model_name: qwen3.8-27b
+    litellm_params:
+      model: openai/qwen3.8-27b
+      api_base: http://qwen3-8-27b-nvfp4-engine:8000/v1
+      api_key: "none"
+    model_info:
+      max_tokens: 262144
+      max_input_tokens: 262144
+      max_output_tokens: 262144
+      supports_tool_choice: true
+      supports_function_calling: true
+      supports_vision: true
+      input_cost_per_token: 0.000000015
+      output_cost_per_token: 0.000000035
+
+  # ── Rollback alias: nvidia/Qwen3.6-35B-A3B-NVFP4 ────────────────────────────
+  # Only reachable if docker-compose.qwen3.6.yml is brought back up instead of
+  # docker-compose.qwen3.8.yml. Kept for rollback, not started by default.
   - model_name: qwen3.6-35b-a3b
     litellm_params:
       model: openai/qwen3.6-35b-a3b
@@ -84,10 +104,10 @@ litellm_settings:
   stream_timeout: 300
   num_retries: 3
   # Catch-all: if a model group fails (after num_retries) and has no specific
-  # entry in `fallbacks`, retry against the local Qwen3.6 engine. Applies to
+  # entry in `fallbacks`, retry against the local primary engine. Applies to
   # anthropic/* passthrough failures (Anthropic API down/rate-limited) as well
   # as any other unmapped model group.
-  default_fallbacks: ["qwen3.6-35b-a3b"]
+  default_fallbacks: ["qwen3.8-27b"]
   turn_off_message_logging: false
   callbacks: ["langfuse_otel"]
 

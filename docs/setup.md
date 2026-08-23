@@ -95,7 +95,13 @@ openssl rand -hex 32  # For LITELLM_SALT_KEY
 
 ### 5. Start the Stack
 
-#### Start with Qwen3.6-35B-A3B-NVFP4 (default):
+#### Start with Qwen3.8-27B-NVFP4 (default):
+
+```bash
+docker compose -f docker-compose.qwen3.8.yml up -d
+```
+
+#### Or start with Qwen3.6-35B-A3B-NVFP4 (rollback):
 
 ```bash
 docker compose -f docker-compose.qwen3.6.yml up -d
@@ -123,24 +129,25 @@ docker compose ps
 docker compose logs -f
 
 # Check specific service logs
-docker compose logs -f qwen3-6-35b-nvfp4-engine   # For Qwen3.6
-docker compose logs -f nemotron-embed-engine    # For Embedding (Qwen3.6 stack)
+docker compose logs -f qwen3-8-27b-nvfp4-engine    # For Qwen3.8 (default)
+docker compose logs -f qwen3-6-35b-nvfp4-engine    # For Qwen3.6 (rollback)
+docker compose logs -f nemotron-embed-engine       # For Embedding (Qwen3.8/3.6 stacks)
 docker compose logs -f qwen3-coder-next-engine     # For Qwen3-Coder
 docker compose logs -f nemotron-engine             # For Nemotron
 ```
 
 ### 7. Wait for Services to Start
 
-- **First start**: May take ~10-35 minutes for model loading (Qwen3.6 first boot includes FlashInfer fp8_gemm autotuning); results persist in `vllm-compile-cache` volume
-- **Subsequent starts**: Typically ~5-15 minutes when cache is loaded from `vllm-compile-cache` volume
+- **First start**: May take ~10-35 minutes for model loading (first boot includes FlashInfer fp8_gemm autotuning); results persist in the engine's own `vllm-*compile-cache` volume
+- **Subsequent starts**: Typically ~5-15 minutes when cache is loaded
 - **Cache invalidation**: Changing `--gpu-memory-utilization`, `--max-num-batched-tokens`, `--max-model-len`, or the vLLM image version forces a full re-tune on next boot
 - **Langfuse**: Wait until UI is accessible at http://localhost:3000
 - **vLLM Engine**: Check `/health` endpoint returns 200
 
 ```bash
 # Check vLLM health
-curl http://localhost:8301/health  # For Qwen3.6-35B
-curl http://localhost:8302/health  # For Embedding Engine (Qwen3.6 stack)
+curl http://localhost:8301/health  # Qwen3.8 (default) or Qwen3.6 (rollback) — whichever stack is running
+curl http://localhost:8302/health  # For Embedding Engine (Qwen3.8/3.6 stacks)
 curl http://localhost:8300/health  # For Qwen3-Coder
 curl http://localhost:8200/health  # For Nemotron
 ```
@@ -161,7 +168,17 @@ curl http://localhost:8200/health  # For Nemotron
 # Set your master key
 export LITELLM_MASTER_KEY=sk-your-master-key
 
-# Test Qwen3.6-35B-A3B-NVFP4 (default)
+# Test Qwen3.8-27B-NVFP4 (default)
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -d '{
+    "model": "qwen3.8-27b",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "temperature": 0.7
+  }'
+
+# Test Qwen3.6-35B-A3B-NVFP4 (rollback)
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
@@ -206,7 +223,10 @@ curl http://localhost:4000/v1/embeddings \
 To switch between models after installation:
 
 ```bash
-# Switch to Qwen3.6-35B-A3B-NVFP4 (default)
+# Switch to Qwen3.8-27B-NVFP4 (default)
+./scripts/model-switch.sh qwen3.8
+
+# Switch to Qwen3.6-35B-A3B-NVFP4 (rollback)
 ./scripts/model-switch.sh qwen3.6
 
 # Switch to Qwen3-Coder-Next-FP8

@@ -1,10 +1,53 @@
 # Model Comparison Guide
 
-This guide compares the three supported LLMs for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
+This guide compares the supported LLMs for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 
 ## Model Overview
 
-### Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
+### Qwen3.8-27B-NVFP4 (DEFAULT)
+
+| Attribute | Value |
+|-----------|-------|
+| **Model Name** | Qwen3.8-27B-NVFP4 |
+| **Provider** | Unsloth |
+| **Total Parameters** | 27B (dense — not MoE) |
+| **Active Parameters** | 27B (all) |
+| **Architecture** | Hybrid Gated-DeltaNet + Gated-Attention, with vision encoder |
+| **Quantization** | compressed-tensors NVFP4 + FP8 (mixed) |
+| **Context Window** | 262K tokens native (extensible to 1M via YaRN, untested here) |
+| **VRAM Required** | ~22.13 GiB weights (confirmed via boot log) |
+| **Model ID** | `unsloth/Qwen3.8-27B-NVFP4` |
+| **vLLM Image** | `vllm/vllm-openai:nightly` |
+| **Port** | 8301 |
+
+#### Key Features
+
+- **Vision-capable**: has a vision encoder, unlike qwen3.6's text-only checkpoint
+- **Dense architecture**: no MoE routing — simpler kernel selection, no `moe_backend` config needed
+- **Native kernels confirmed**: `FlashInferCutlassNvFp4LinearKernel` (NVFP4 GEMM) and
+  `CutlassFP8ScaledMMLinearKernel` (FP8 layers), no Marlin fallback needed on GB10/SM121 for this
+  quantization scheme (unlike qwen3.6's ModelOpt scheme, which does need Marlin)
+- **Native Reasoning**: `--reasoning-parser qwen3`
+- **Tool Calling**: `--tool-call-parser qwen3_xml` — **carried over by analogy from qwen3.6, not
+  independently verified for this model**; see `docker-compose.qwen3.8.yml`'s PROVENANCE header
+- **Speculative Decoding**: MTP support, `num_speculative_tokens=2` (matches Unsloth's own documented example)
+
+#### Use Cases
+
+- AI coding agent (Cline, Claude Code) — primary/default model for this stack
+- Vision-assisted coding tasks (screenshots, diagrams)
+- Technical documentation
+- General-purpose assistant with coding focus
+
+#### Known-unverified items
+
+See `docker-compose.qwen3.8.yml`'s PROVENANCE and CORRECTIONS HISTORY headers for the full list of what's
+confirmed vs. assumed. `--gpu-memory-utilization` was corrected from an initial `0.4` (which OOM'd on first
+boot) to `0.6` — verified working but not yet a measured optimum.
+
+---
+
+### Qwen3.6-35B-A3B-NVFP4 (ROLLBACK)
 
 | Attribute | Value |
 |-----------|-------|
@@ -120,7 +163,7 @@ This guide compares the three supported LLMs for the **NVIDIA DGX Spark (Blackwe
 | **VRAM Required** | ~1-2 GB (NVFP4 quantized) |
 | **Model ID** | `nvidia/Nemotron-3-Embed-1B-NVFP4` |
 | **vLLM Image** | `vllm/vllm-openai:nightly` (requires vLLM 0.25.0+; 0.23.x/0.24.x broken) |
-| **Port** | 8302 (Qwen3.6 stack only) |
+| **Port** | 8302 (Qwen3.8/3.6 stacks) |
 
 #### Key Features
 
@@ -140,23 +183,59 @@ This guide compares the three supported LLMs for the **NVIDIA DGX Spark (Blackwe
 
 ## Model Comparison
 
-| Feature | Qwen3.6-35B-A3B-NVFP4 | Qwen3-Coder-Next-FP8 | Nemotron-3-Super-120B | Embedding |
-|---------|----------------------|---------------------|----------------------|-----------|
-| **Context** | 262K (131K default) | 262K | 262K | 4096 |
-| **VRAM (weights)** | ~26 GB | ~118 GB | ~80 GB | ~1-2 GB |
-| **Model Type** | 35B MoE (3B active) | 80B MoE (3B active) | 120B MoE (12B active) | 1.14B text encoder |
-| **Quantization** | NVFP4 | FP8 | NVFP4 | NVFP4 |
-| **Output Format** | Standard JSON | Standard JSON | Reasoning blocks | 2048-dim vector |
-| **Vision** | ❌ No | ❌ No | ❌ No | ❌ No |
-| **Tool Calling** | Native (qwen3_xml) | Native (qwen3_coder) | Requires parser | N/A |
-| **Best For** | Coding (Cline) | Coding tasks | General reasoning | Embeddings/RAG |
-| **Runs Concurrently** | ❌ | ❌ | ❌ | ✅ Yes |
+| Feature | Qwen3.8-27B-NVFP4 | Qwen3.6-35B-A3B-NVFP4 | Qwen3-Coder-Next-FP8 | Nemotron-3-Super-120B | Embedding |
+|---------|-------------------|----------------------|---------------------|----------------------|-----------|
+| **Context** | 262K | 262K (131K default) | 262K | 262K | 4096 |
+| **VRAM (weights)** | ~22 GB | ~26 GB | ~118 GB | ~80 GB | ~1-2 GB |
+| **Model Type** | 27B dense | 35B MoE (3B active) | 80B MoE (3B active) | 120B MoE (12B active) | 1.14B text encoder |
+| **Quantization** | NVFP4+FP8 (compressed-tensors) | NVFP4 (ModelOpt) | FP8 | NVFP4 | NVFP4 |
+| **Output Format** | Standard JSON | Standard JSON | Standard JSON | Reasoning blocks | 2048-dim vector |
+| **Vision** | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No |
+| **Tool Calling** | Native (qwen3_xml, unverified) | Native (qwen3_xml) | Native (qwen3_coder) | Requires parser | N/A |
+| **Best For** | Coding (Cline/Claude Code), default | Coding (rollback) | Coding tasks | General reasoning | Embeddings/RAG |
+| **Runs Concurrently** | ❌ | ❌ | ❌ | ❌ | ✅ Yes |
 
 ---
 
 ## Configuration Comparison
 
-### Qwen3.6-35B-A3B-NVFP4 (docker-compose.qwen3.6.yml)
+### Qwen3.8-27B-NVFP4 (docker-compose.qwen3.8.yml, default)
+
+```yaml
+qwen3-8-27b-nvfp4-engine:
+  image: vllm/vllm-openai:nightly
+  environment:
+    HF_TOKEN: ${HF_TOKEN}
+    TRITON_CACHE_DIR: /root/.triton/cache
+    FLASHINFER_DISABLE_VERSION_CHECK: "1"
+    CUTE_DSL_ARCH: sm_121a
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+  volumes:
+    - vllm-qwen38-triton-cache:/root/.triton/cache
+  command:
+    --model unsloth/Qwen3.8-27B-NVFP4
+    --served-model-name qwen3.8-27b
+    --dtype auto
+    --kv-cache-dtype fp8
+    --gpu-memory-utilization 0.6
+    --max-model-len 262144
+    --max-num-seqs 4
+    --max-num-batched-tokens 8192
+    --load-format fastsafetensors
+    --mamba-ssm-cache-dtype float32
+    --attention-backend flashinfer
+    --tool-call-parser qwen3_xml
+    --reasoning-parser qwen3
+    --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN38_NUM_SPECULATIVE_TOKENS:-2}}'
+```
+
+No `--quantization` flag — compressed-tensors NVFP4/FP8 is auto-detected from the checkpoint. No `--moe-backend` or
+MoE-specific env vars either — this is a dense model, unlike every other engine in this table. See
+`docker-compose.qwen3.8.yml`'s PROVENANCE and CORRECTIONS HISTORY headers for what's verified vs. carried over by
+analogy from qwen3.6 (`--tool-call-parser qwen3_xml` in particular is unverified for this model), and for the
+`--gpu-memory-utilization 0.4 → 0.6` real-boot OOM correction.
+
+### Qwen3.6-35B-A3B-NVFP4 (docker-compose.qwen3.6.yml, rollback)
 
 ```yaml
 qwen3-6-35b-nvfp4-engine:
@@ -236,7 +315,7 @@ nemotron-engine:
     --tool-call-parser qwen3_coder
 ```
 
-### Embedding Model (docker-compose.qwen3.6.yml)
+### Embedding Model (docker-compose.qwen3.8.yml / docker-compose.qwen3.6.yml — identical config in both)
 
 ```yaml
 nemotron-embed-engine:
@@ -256,12 +335,20 @@ nemotron-embed-engine:
 
 ## Selecting the Right Model
 
-### Choose Qwen3.6-35B-A3B-NVFP4 (default) if:
+### Choose Qwen3.8-27B-NVFP4 (default) if:
 
+- You're doing **coding tasks** with Cline/Claude Code — this is the primary/default stack
+- You need **vision support** (screenshots, diagrams) alongside coding
+- You need **large context** (262K tokens) for long documents
+- You're comfortable with a model whose flags are still being empirically verified (see the compose
+  file's PROVENANCE header) — first production use is the real test of `--tool-call-parser qwen3_xml`
+
+### Choose Qwen3.6-35B-A3B-NVFP4 (rollback) if:
+
+- Qwen3.8 regresses on something Qwen3.6 was known-good at (tool calling, latency, stability)
 - You need **large context** (up to 262K tokens) for long documents
-- You're doing **coding tasks** with Cline/AI agents
-- You need **native tool calling** with qwen3_xml parser
-- You want **fast restarts** with FlashInfer cache persistence
+- You need **native tool calling** with a confirmed-working qwen3_xml parser
+- You want **fast restarts** with FlashInfer cache persistence (already warmed from prior use)
 - You need **efficient memory usage** (only ~26GB weights)
 
 ### Choose Qwen3-Coder-Next-FP8 if:
@@ -288,7 +375,22 @@ nemotron-embed-engine:
 
 ## Testing Models
 
-### Test Qwen3.6-35B-A3B-NVFP4 (default)
+### Test Qwen3.8-27B-NVFP4 (default)
+
+```bash
+# Switch to Qwen3.8
+./scripts/model-switch.sh qwen3.8
+
+# Test API
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -d '{
+    "model": "qwen3.8-27b",
+    "messages": [{"role": "user", "content": "Write a Python function to sort a list."}]
+  }'
+```
+
+### Test Qwen3.6-35B-A3B-NVFP4 (rollback)
 
 ```bash
 # Switch to Qwen3.6

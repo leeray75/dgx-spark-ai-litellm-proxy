@@ -29,8 +29,9 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 │                    ┌─────────────────────────┼─────────────────────────────┐
 │                    │                         │                             │
 │          ┌─────────▼─────────┐   ┌───────────▼────────────┐               │
-│          │  Langfuse Worker  │   │   Qwen3.6 Engine       │               │
-│          │  (Async Events)   │   │   (vLLM, 8301)         │               │
+│          │  Langfuse Worker  │   │  Qwen3.8/3.6 Engine    │               │
+│          │  (Async Events)   │   │  (vLLM, 8301 —         │               │
+│          │                   │   │   mutually exclusive)  │               │
 │          └─────────┬─────────┘   └───────────┬────────────┘               │
 │                    │                         │                             │
 │          ┌─────────▼─────────┐   ┌───────────▼────────────┐               │
@@ -74,12 +75,13 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 
 | Service | Image | Port | Model | Quantization |
 |---------|-------|------|-------|--------------|
-| Qwen3.6 Engine | `vllm/vllm-openai:nightly` | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 |
+| Qwen3.8 Engine (default) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.8-27B-NVFP4 | NVFP4+FP8 (compressed-tensors) |
+| Qwen3.6 Engine (rollback) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 (ModelOpt) |
 | Embedding Engine | `vllm/vllm-openai:nightly` | 8302 | nemotron-3-embed-1b-nvfp4 | NVFP4 |
 | Qwen3-Coder Engine | `vllm/vllm-openai:v0.19.1-cu130` | 8300 | Qwen3-Coder-Next-FP8 | FP8 |
 | Nemotron Engine | `vllm/vllm-openai:v0.18.1-cu130` | 8200 | Nemotron-3-Super-120B | NVFP4 |
 
-> **Note:** Each compose stack pins a different vLLM image — do not swap these. Nemotron requires `v0.18.1` (not `v0.19.1`), and Qwen3-Coder uses `v0.19.1` for GDN/Mamba stability. Only the Qwen3.6 stack uses `nightly` for FlashInfer persistent cache support.
+> **Note:** Each compose stack pins a different vLLM image — do not swap these. Nemotron requires `v0.18.1` (not `v0.19.1`), and Qwen3-Coder uses `v0.19.1` for GDN/Mamba stability. The Qwen3.8 and Qwen3.6 stacks both use `nightly` for FlashInfer persistent cache support and share port 8301 — only one runs at a time, same as every other pair of chat engines here.
 
 ### Proxy Layer
 
@@ -103,7 +105,7 @@ All services connect via a Docker bridge network called `ai-bridge`:
 |------|---------|---------------|---------|
 | 3000 | Langfuse Web | External | Web UI, API |
 | 4000 | LiteLLM | External | OpenAI-compatible API |
-| 8301 | Qwen3.6 Engine | External | Direct vLLM access (Qwen3.6-35B) |
+| 8301 | Qwen3.8 Engine (default) / Qwen3.6 Engine (rollback) | External | Direct vLLM access — mutually exclusive, whichever stack is running |
 | 8302 | Embedding Engine | External | Direct vLLM access (embeddings) |
 | 8300 | Qwen3-Coder Engine | External | Direct vLLM access (Qwen3-Coder) |
 | 8200 | Nemotron Engine | External | Direct vLLM access |
@@ -127,11 +129,24 @@ All services connect via a Docker bridge network called `ai-bridge`:
 
 ## Model Details
 
-### Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
+### Qwen3.8-27B-NVFP4 (DEFAULT)
+
+- **Size**: 27B total parameters, dense (not MoE — all params active)
+- **Architecture**: Hybrid Gated-DeltaNet + Gated-Attention, with vision encoder
+- **Quantization**: compressed-tensors NVFP4 + FP8 (mixed)
+- **Context**: 262K tokens native
+- **GPU Memory**: ~22.13GB weights confirmed via boot log (plus KV cache; `--gpu-memory-utilization 0.6`)
+- **Vision Support**: Yes
+- **Reasoning**: Native thinking tokens with `--reasoning-parser qwen3`
+- **Special**: `--tool-call-parser qwen3_xml` (carried over from qwen3.6 by analogy, unverified for this
+  model), `--load-format fastsafetensors`, no `--quantization`/`--moe-backend` flags needed (dense,
+  auto-detected quantization). See `docker-compose.qwen3.8.yml`'s PROVENANCE header for full detail.
+
+### Qwen3.6-35B-A3B-NVFP4 (ROLLBACK)
 
 - **Size**: 35B total parameters, 3B active (MoE)
 - **Architecture**: Hybrid Attention + MoE
-- **Quantization**: NVFP4 (NVIDIA 4-bit)
+- **Quantization**: NVFP4 (NVIDIA ModelOpt)
 - **Context**: 262K tokens (131K default in LiteLLM)
 - **GPU Memory**: ~26GB weights (plus KV cache)
 - **Vision Support**: No (text-only)
@@ -174,7 +189,10 @@ All services connect via a Docker bridge network called `ai-bridge`:
 | `langfuse-clickhouse-logs` | ClickHouse server logs |
 | `langfuse-minio-data` | MinIO object storage |
 | `langfuse-redis-data` | Redis RDB/AOF data |
-| `vllm-compile-cache` | torch.compile + FlashInfer autotune configs |
-| `vllm-flashinfer-cache` | FlashInfer JIT kernel workspace |
-| `vllm-triton-cache` | Triton kernel cache |
-| `vllm-embed-compile-cache` | Embedding engine compile cache |
+| `vllm-compile-cache` | torch.compile + FlashInfer autotune configs (qwen3.6 rollback engine) |
+| `vllm-flashinfer-cache` | FlashInfer JIT kernel workspace (qwen3.6 rollback engine) |
+| `vllm-triton-cache` | Triton kernel cache (qwen3.6 rollback engine) |
+| `vllm-qwen38-compile-cache` | torch.compile + FlashInfer autotune configs (qwen3.8 default engine) |
+| `vllm-qwen38-flashinfer-cache` | FlashInfer JIT kernel workspace (qwen3.8 default engine) |
+| `vllm-qwen38-triton-cache` | Triton kernel cache (qwen3.8 default engine) |
+| `vllm-embed-compile-cache` | Embedding engine compile cache (shared by both qwen3.8 and qwen3.6 stacks) |

@@ -1,4 +1,4 @@
-# AI LLM Proxy - Qwen3.6-35B-A3B-NVFP4, Qwen3-Coder-Next-FP8 & Nemotron-3-Super-120B
+# AI LLM Proxy - Qwen3.8-27B-NVFP4, Qwen3.6-35B-A3B-NVFP4, Qwen3-Coder-Next-FP8 & Nemotron-3-Super-120B
 
 An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** with Langfuse v3 observability.
 
@@ -6,7 +6,7 @@ An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** 
 
 ## Features
 
-- **Triple Model Support**: Switch between Qwen3.6-35B-A3B-NVFP4 (default), Qwen3-Coder-Next-FP8 (80B), and Nemotron-3-Super-120B (NVFP4)
+- **Multi-Model Support**: Switch between Qwen3.8-27B-NVFP4 (default, vision-capable), Qwen3.6-35B-A3B-NVFP4 (rollback), Qwen3-Coder-Next-FP8 (80B), and Nemotron-3-Super-120B (NVFP4)
 - **Text Embedding**: `nemotron-3-embed-1b-nvfp4` (NVFP4-quantized) for text embeddings (2048-dim)
 - **OpenAI-Compatible API**: Drop-in replacement for OpenAI API calls
 - **Langfuse v3 Observability**: Full traceability, cost tracking, and analytics
@@ -28,8 +28,9 @@ An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** 
         ┌──────────────────────┼──────────────────────┐
         │                      │                      │
 ┌───────▼───────┐   ┌──────────▼──────────┐   ┌───────▼───────┐
-│ Qwen3.6 Engine│   │ Embedding Engine    │   │  Langfuse UI  │
-│  (port 8301)  │   │   (port 8302)       │   │  (port 3000)  │
+│Qwen3.8/3.6 Eng│   │ Embedding Engine    │   │  Langfuse UI  │
+│(port 8301, one│   │   (port 8302)       │   │  (port 3000)  │
+│  at a time)   │   │                     │   │               │
 └───────────────┘   └─────────────────────┘   └───────────────┘
         │
         │                ┌──────────────┐
@@ -72,7 +73,10 @@ An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** 
 
 3. **Start the stack**:
    ```bash
-   # Start with Qwen3.6-35B-A3B-NVFP4 (default)
+   # Start with Qwen3.8-27B-NVFP4 (default)
+   docker compose -f docker-compose.qwen3.8.yml up -d
+
+   # Or start with Qwen3.6-35B-A3B-NVFP4 (rollback)
    docker compose -f docker-compose.qwen3.6.yml up -d
 
    # Or start with Qwen3-Coder-Next-FP8
@@ -94,7 +98,10 @@ An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** 
 Switch between models:
 
 ```bash
-# Switch to Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
+# Switch to Qwen3.8-27B-NVFP4 (DEFAULT)
+./scripts/model-switch.sh qwen3.8
+
+# Switch to Qwen3.6-35B-A3B-NVFP4 (ROLLBACK)
 ./scripts/model-switch.sh qwen3.6
 
 # Switch to Qwen3-Coder-Next-FP8
@@ -112,10 +119,13 @@ Switch between models:
 Full stack restart with system cache clearing (for NVIDIA DGX Spark Blackwell GB10):
 
 ```bash
-# Restart with Qwen3.6-35B-A3B-NVFP4 (default)
+# Restart with Qwen3.8-27B-NVFP4 (default)
 ./scripts/restart.sh
 
-# Restart with Qwen3.6-35B-A3B-NVFP4
+# Restart with Qwen3.8-27B-NVFP4
+./scripts/restart.sh qwen3.8
+
+# Restart with Qwen3.6-35B-A3B-NVFP4 (rollback)
 ./scripts/restart.sh qwen3.6
 
 # Restart with Qwen3-Coder-Next-FP8
@@ -140,7 +150,7 @@ Full stack restart with system cache clearing (for NVIDIA DGX Spark Blackwell GB
 | Langfuse UI | http://localhost:3000 | 3000 |
 | LiteLLM API | http://localhost:4000/v1 | 4000 |
 | LiteLLM UI | http://localhost:4000/ui | 4000 |
-| Qwen3.6 Engine | http://localhost:8301/v1 | 8301 |
+| Qwen3.8 Engine (default) / Qwen3.6 Engine (rollback) | http://localhost:8301/v1 | 8301 |
 | Embedding Engine | http://localhost:8302/v1 | 8302 |
 | Qwen3-Coder Engine | http://localhost:8300/v1 | 8300 |
 | Nemotron Engine | http://localhost:8200/v1 | 8200 |
@@ -151,7 +161,17 @@ Full stack restart with system cache clearing (for NVIDIA DGX Spark Blackwell GB
 ### OpenAI Compatible
 
 ```bash
-# Qwen3.6-35B-A3B-NVFP4 (default)
+# Qwen3.8-27B-NVFP4 (default)
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -d '{
+    "model": "qwen3.8-27b",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "temperature": 0.7
+  }'
+
+# Qwen3.6-35B-A3B-NVFP4 (rollback)
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
@@ -220,16 +240,17 @@ The LiteLLM proxy provides an OpenAI-compatible API and works with many AI agent
 
 | Agent/Tool | API Model | Port | Purpose |
 |------------|-----------|------|---------|
-| Cline Code | `qwen3.6-35b-a3b`, `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
-| Cursor IDE | `qwen3.6-35b-a3b`, `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
-| Continue | `qwen3.6-35b-a3b`, `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
-| Codeium | `qwen3.6-35b-a3b`, `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
+| Cline Code | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
+| Claude Code | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | CLI AI coding assistant |
+| Cursor IDE | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
+| Continue | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
+| Codeium | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
 | OpenWebUI | Direct endpoint | 3000 | Web-based LLM interface |
-| OpenAI SDK | `qwen3.6-35b-a3b`, `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
+| OpenAI SDK | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
 
 **Full documentation:** See [AI Agent Configuration](docs/agents.md) for detailed setup guides.
 
-> **Note:** All agents support the same backend models — Qwen3.6-35B-A3B-NVFP4, Qwen3-Coder-Next-FP8, and Nemotron-3-Super-120B.
+> **Note:** All agents support the same backend models — Qwen3.8-27B-NVFP4 (default), Qwen3.6-35B-A3B-NVFP4 (rollback), Qwen3-Coder-Next-FP8, and Nemotron-3-Super-120B. Only one chat engine runs at a time.
 
 ## Changelog
 
