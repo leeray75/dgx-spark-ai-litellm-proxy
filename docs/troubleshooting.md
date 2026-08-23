@@ -13,17 +13,18 @@
 
 **Solution**:
 
-The initial model loading can take 10-60 minutes (Qwen3.6 first boot includes FlashInfer fp8_gemm autotuning). Subsequent starts are typically 5-15 minutes due to persistent cache in the `vllm-compile-cache` volume.
+The initial model loading can take 10-60 minutes (first boot includes FlashInfer fp8_gemm autotuning). Subsequent starts are typically 5-15 minutes due to persistent cache in the engine's own `vllm-*compile-cache` volume.
 
 ```bash
 # Check container logs
-docker compose logs -f qwen3-6-35b-nvfp4-engine
+docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (default)
+docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (rollback)
 docker compose logs -f nemotron-embed-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine
 
 # Wait for loading to complete
-# The health check has a 3600s start_period for Qwen3.6 (chat engine)
+# The health check has a 3600s start_period for the chat engine (Qwen3.8/Qwen3.6)
 # and 900s start_period for the embedding engine
 ```
 
@@ -31,12 +32,7 @@ docker compose logs -f nemotron-engine
 1. Check GPU memory: `nvidia-smi`
 2. Verify HF_TOKEN is correct in `.env`
 3. Ensure enough disk space for model cache
-4. Check FlashInfer autotune cache: `docker compose logs qwen3-6-35b-nvfp4-engine | grep -i flashinfer`
-
-**If loading fails**:
-1. Check GPU memory: `nvidia-smi`
-2. Verify HF_TOKEN is correct in `.env`
-3. Ensure enough disk space for model cache
+4. Check FlashInfer autotune cache: `docker compose logs qwen3-8-27b-nvfp4-engine | grep -i flashinfer` (swap container name for the qwen3.6 rollback)
 
 ---
 
@@ -63,8 +59,8 @@ docker compose logs litellm
 
 3. Verify the vLLM engine is healthy:
 ```bash
-curl http://localhost:8301/health  # For Qwen3.6-35B
-curl http://localhost:8302/health  # For Embedding Engine (Qwen3.6 stack)
+curl http://localhost:8301/health  # Qwen3.8 (default) or Qwen3.6 (rollback) — whichever stack is running
+curl http://localhost:8302/health  # For Embedding Engine (Qwen3.8/3.6 stacks)
 curl http://localhost:8300/health  # For Qwen3-Coder
 curl http://localhost:8200/health  # For Nemotron
 ```
@@ -141,6 +137,41 @@ command:
 command:
   --max-num-seqs 8  # Reduce from 16
 ```
+
+---
+
+### 4a. "No available memory for the cache blocks" (Qwen3.8, real incident)
+
+**Problem**: Engine crashes on first boot, `docker inspect` shows the container restarting.
+
+**Symptoms**:
+```
+ValueError: No available memory for the cache blocks. Try increasing `gpu_memory_utilization`
+when initializing the engine (this flag also controls CPU memory reservation on the CPU
+backend, despite its name).
+```
+Preceded by a log line like:
+```
+CUDA graph memory profiling is enabled (default since v0.21.0). The current
+--gpu-memory-utilization=0.4000 is equivalent to --gpu-memory-utilization=0.3841 without
+CUDA graph memory profiling. To maintain the same effective KV cache size as before,
+increase --gpu-memory-utilization to 0.4159.
+```
+
+**Why this happened**: `docker-compose.qwen3.8.yml` initially carried `--gpu-memory-utilization 0.4` over from
+qwen3.6 by analogy — untested for this model. On real first boot it left literally zero room for KV cache after
+weights (~22.13 GiB) and CUDA-graph memory profiling, which for this checkpoint includes profiling the vision
+encoder/multimodal path (qwen3.6's text-only checkpoint never had to account for this).
+
+**Solution**:
+
+1. This is already fixed in the current `docker-compose.qwen3.8.yml` (`--gpu-memory-utilization 0.6`, confirmed
+   working with 13.96 GiB KV cache available). If you see this error, check you're on the current file version.
+2. If it recurs (e.g. after raising `--max-model-len` or other config that increases the memory footprint), raise
+   `--gpu-memory-utilization` further and recreate: `docker compose -f docker-compose.qwen3.8.yml up -d
+   --force-recreate qwen3-8-27b-nvfp4-engine`.
+3. The log line quoted above (right before the crash) tells you the exact breakeven value for your current
+   config — treat that as a floor, not a target; leave real headroom above it for actual KV cache.
 
 ---
 
@@ -245,19 +276,19 @@ docker compose down
 
 1. Verify you're using a nightly image built after 2026-05-31:
 ```bash
-docker inspect --format '{{.Config.Image}}' qwen3-6-35b-nvfp4-engine
+docker inspect --format '{{.Config.Image}}' qwen3-8-27b-nvfp4-engine   # or qwen3-6-35b-nvfp4-engine for rollback
 ```
 
 2. Check for cache-load message:
 ```bash
-docker compose logs qwen3-6-35b-nvfp4-engine | grep -i "flashinfer.*cache"
+docker compose logs qwen3-8-27b-nvfp4-engine | grep -i "flashinfer.*cache"   # or qwen3-6-35b-nvfp4-engine
 ```
 
 3. If cache is disabled, force re-tune and escape hatch:
 ```bash
 # Clear the cache volume to force fresh autotuning
-docker volume rm ai-litellm-proxy_vllm-compile-cache
-docker compose up -d qwen3-6-35b-nvfp4-engine
+docker volume rm ai-litellm-proxy_vllm-qwen38-compile-cache   # or ai-litellm-proxy_vllm-compile-cache for rollback
+docker compose -f docker-compose.qwen3.8.yml up -d qwen3-8-27b-nvfp4-engine
 ```
 
 4. If output looks wrong after cache load, disable persistent cache:
@@ -268,7 +299,6 @@ VLLM_DISABLE_FLASHINFER_AUTOTUNE_CACHE=1
 
 ---
 
-### 7b. Langfuse Events Not Showing
 ### 7b. Langfuse Events Not Showing
 
 **Problem**: API requests are tracked but traces don't appear in UI.
@@ -313,7 +343,8 @@ grep LANGFUSE_SECRET_KEY .env
 docker compose logs -f
 
 # Specific service
-docker compose logs -f qwen3-6-35b-nvfp4-engine
+docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (default)
+docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (rollback)
 docker compose logs -f nemotron-embed-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine
@@ -338,14 +369,14 @@ docker compose exec redis redis-cli -a <REDIS_AUTH> LOG GET
 docker compose ps -a
 
 # Check network connectivity
-docker compose exec litellm ping -c 3 qwen3-6-35b-nvfp4-engine
+docker compose exec litellm ping -c 3 qwen3-8-27b-nvfp4-engine   # or qwen3-6-35b-nvfp4-engine for rollback
 docker compose exec litellm ping -c 3 nemotron-embed-engine
 docker compose exec litellm ping -c 3 qwen3-coder-next-engine
 docker compose exec litellm ping -c 3 langfuse
 
 # Inspect container details
 docker compose inspect litellm
-docker compose inspect qwen3-6-35b-nvfp4-engine
+docker compose inspect qwen3-8-27b-nvfp4-engine   # or qwen3-6-35b-nvfp4-engine for rollback
 docker compose inspect nemotron-embed-engine
 
 # Execute commands in container

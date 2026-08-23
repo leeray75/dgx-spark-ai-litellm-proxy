@@ -58,7 +58,7 @@ The restart script drops system caches (`sync; echo 3 > /proc/sys/vm/drop_caches
 
 ```bash
 docker compose ps
-docker compose logs -f <service>   # e.g. litellm, qwen3-6-35b-nvfp4-engine
+docker compose logs -f <service>   # e.g. litellm, qwen3-8-27b-nvfp4-engine
 ```
 
 ## Configuration Files
@@ -141,7 +141,7 @@ Each compose file pins a different vLLM image — do not swap these:
 | `nemotron-super` | Nemotron-3-Super-120B | General reasoning (262K context) |
 | `nemotron-3-embed-1b-nvfp4` | Nemotron-3-Embed-1B-NVFP4 | Text-only embedding, 2048-dim, NVFP4 (`/v1/embeddings`); requires manual `query:`/`passage:` input prefix |
 
-> **Note:** The `anthropic/*` wildcard passthrough (added v1.4.0) routes all Claude model IDs — including future releases and any alias Claude Code/Desktop introduces — directly to Anthropic's real API via the proxy. A `default_fallbacks` entry sends failed requests to the local Qwen3.6 engine. This replaces the older approach of using individual `claude-sonnet-4-6` / `claude-haiku-4-6` proxy aliases (removed in v1.3.0).
+> **Note:** The `anthropic/*` wildcard passthrough (added v1.4.0) routes all Claude model IDs — including future releases and any alias Claude Code/Desktop introduces — directly to Anthropic's real API via the proxy. A `default_fallbacks` entry sends failed requests to the local default engine (`qwen3.8-27b`). This replaces the older approach of using individual `claude-sonnet-4-6` / `claude-haiku-4-6` proxy aliases (removed in v1.3.0).
 
 ## Key vLLM Flags by Model
 

@@ -4,7 +4,54 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **New default model: `unsloth/Qwen3.8-27B-NVFP4`** (`docker-compose.qwen3.8.yml`). Dense (not MoE) hybrid
+  Gated-DeltaNet + Gated-Attention model with a vision encoder, compressed-tensors NVFP4/FP8 quantization — a
+  different quantization scheme from qwen3.6's NVIDIA ModelOpt checkpoint. Mirrors qwen3.6's full stack structure
+  (Langfuse observability, embedding engine, same ports) so it's a drop-in replacement as the primary model for
+  Cline/Claude Code. `docker-compose.qwen3.6.yml` is kept, unmodified, as a rollback path — `./scripts/restart.sh
+  qwen3.6` or `./scripts/model-switch.sh qwen3.6` switches back with no file edits needed. `litellm-config.yaml`
+  keeps both `qwen3.8-27b` (new default) and `qwen3.6-35b-a3b` (rollback) routes; `default_fallbacks` now points at
+  `qwen3.8-27b`. Added a matching `qwen3.8-27b` pricing entry in the Langfuse "dgx-spark" project (same per-token
+  rates as qwen3.6: `$0.000000015`/`$0.000000035`) via the Langfuse Models API — this is runtime state, not tracked
+  in this repo.
+  - `docker-compose.qwen3.8.yml` carries an unusually detailed header (PROVENANCE + CORRECTIONS HISTORY) documenting
+    exactly which flags are verified against primary sources (HF `config.json`, Unsloth's own docs, live vLLM
+    registry introspection) vs. carried over from qwen3.6 by architectural analogy vs. genuinely unverified — read
+    it before changing that file. `--tool-call-parser qwen3_xml` in particular is carried-by-analogy, not confirmed
+    for this model.
+  - Pulled a fresh `vllm/vllm-openai:nightly` (digest `sha256:95bed119…`, vLLM `0.26.1rc1.dev1102+ge9d1398d9`) and
+    confirmed via live registry introspection that it registers `Qwen3_5ForConditionalGeneration` — the exact
+    architecture class in the checkpoint's `config.json` — before writing any flags.
+  - **Real first-boot finding**: `--gpu-memory-utilization 0.4`, carried over from qwen3.6 as an unverified
+    assumption, crashed with `ValueError: No available memory for the cache blocks`. vLLM's own log explained why:
+    CUDA-graph memory profiling made the effective utilization lower than the nominal value, and this model's
+    memory-profiling pass (which includes the vision encoder/multimodal path qwen3.6's text-only checkpoint never
+    had to account for) left zero room for KV cache. Corrected to `0.6` — verified working (13.96 GiB KV cache
+    available on the fixed boot) but not yet a measured optimum.
+  - **Real first-boot confirmation**: compressed-tensors NVFP4 auto-selected native `FlashInferCutlassNvFp4LinearKernel`
+    and `CutlassFP8ScaledMMLinearKernel` kernels with no Marlin fallback needed — different from qwen3.6's
+    ModelOpt-scheme experience, where SM121 forced a Marlin fallback. The MTP drafter resolved cleanly as
+    `Qwen3_5MTP` with no MoE-backend workaround needed, confirming the file's dense-model assumption.
+  - Verified end-to-end with a real request through LiteLLM → vLLM → back, confirming `reasoning_content` is
+    correctly separated from `content` by `--reasoning-parser qwen3`.
+
 ### Fixed
+
+- **`scripts/model-switch.sh` `show_status` checked a stale container name**: looked for `qwen3-6-27b-engine`, but
+  the actual qwen3.6 container (since the 35B-A3B rename) is `qwen3-6-35b-nvfp4-engine` — meaning `./scripts/
+  model-switch.sh status` always reported Qwen3.6 as stopped even when it was running. Fixed while adding the
+  qwen3.8 status check alongside it.
+
+### Known issue (not fixed, deferred)
+
+- **`LITELLM_MASTER_KEY` in `.env` is still the sample placeholder** (`sk-change-me-in-production`). Discovered
+  while verifying the qwen3.8 stack end-to-end. Since LiteLLM binds `0.0.0.0:4000` (not just localhost) and
+  `LANGFUSE_HOST` is a Tailscale hostname — implying port 4000 is meant to be tailnet-reachable — anyone on the
+  tailnet can currently authenticate with this well-known default, including the `anthropic/*` passthrough route
+  (billed to the real Anthropic key). Left for the user to rotate (`openssl rand -hex 32`) since `.env` is a
+  secrets file this project deliberately avoids editing automatically.
 
 - **Qwen3.6 Triton JIT cache was never actually persisted**: `docs/architecture.md` and the v1.3.0 CHANGELOG entry
   both claimed a `vllm-triton-cache` volume existed alongside `vllm-compile-cache`/`vllm-flashinfer-cache`, but it
