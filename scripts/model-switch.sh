@@ -1,9 +1,11 @@
 #!/bin/bash
 # =============================================================================
-# model-switch.sh — Switch between AI models (Qwen3.6-27B-FP8, Qwen3-Coder-Next-FP8, and Nemotron-3-Super-120B)
+# model-switch.sh — Switch between AI models (Qwen3.8-27B-NVFP4, Qwen3.6-27B-FP8,
+# Qwen3-Coder-Next-FP8, and Nemotron-3-Super-120B)
 #
 # Usage:
-#   ./model-switch.sh qwen3.6  — Switch to Qwen3.6-27B-FP8 (DEFAULT)
+#   ./model-switch.sh qwen3.8  — Switch to Qwen3.8-27B-NVFP4 (DEFAULT)
+#   ./model-switch.sh qwen3.6  — Switch to Qwen3.6-27B-FP8 (rollback)
 #   ./model-switch.sh qwen     — Switch to Qwen3-Coder-Next-FP8
 #   ./model-switch.sh nemotron — Switch to Nemotron-3-Super-120B-A12B-NVFP4
 #   ./model-switch.sh status   — Show current model status
@@ -20,6 +22,7 @@ set -euo pipefail
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+COMPOSE_QWEN38="${PROJECT_DIR}/docker-compose.qwen3.8.yml"
 COMPOSE_QWEN36="${PROJECT_DIR}/docker-compose.qwen3.6.yml"
 COMPOSE_QWEN="${PROJECT_DIR}/docker-compose.yml"
 COMPOSE_NEMOTRON="${PROJECT_DIR}/docker-compose.nemotron.yml"
@@ -90,6 +93,9 @@ check_env_vars() {
 # Stop all containers
 stop_all() {
     log_info "Stopping all containers..."
+    if [[ -f "$COMPOSE_QWEN38" ]]; then
+        docker compose -f "$COMPOSE_QWEN38" down --remove-orphans 2>/dev/null || true
+    fi
     if [[ -f "$COMPOSE_QWEN36" ]]; then
         docker compose -f "$COMPOSE_QWEN36" down --remove-orphans 2>/dev/null || true
     fi
@@ -101,14 +107,31 @@ stop_all() {
     fi
 }
 
-# Switch to Qwen3.6-27B-FP8 (DEFAULT)
+# Switch to Qwen3.8-27B-NVFP4 (DEFAULT)
+switch_to_qwen38() {
+    log_info "Switching to Qwen3.8-27B-NVFP4..."
+    stop_all
+
+    log_info "Starting Qwen3.8-27B-NVFP4 engine (port 8301)..."
+    docker compose -f "$COMPOSE_QWEN38" up -d
+
+    log_success "✓ Switched to Qwen3.8-27B-NVFP4"
+    echo ""
+    echo "Access points:"
+    echo "  Langfuse UI:    http://localhost:3000"
+    echo "  LiteLLM API:    http://localhost:4000"
+    echo "  vLLM Engine:    http://localhost:8301/v1"
+    echo "  Model:          unsloth/Qwen3.8-27B-NVFP4"
+}
+
+# Switch to Qwen3.6-27B-FP8 (rollback)
 switch_to_qwen36() {
     log_info "Switching to Qwen3.6-27B-FP8..."
     stop_all
-    
+
     log_info "Starting Qwen3.6-27B-FP8 engine (port 8301)..."
     docker compose -f "$COMPOSE_QWEN36" up -d
-    
+
     log_success "✓ Switched to Qwen3.6-27B-FP8"
     echo ""
     echo "Access points:"
@@ -157,17 +180,25 @@ show_status() {
     log_info "Checking container status..."
     echo ""
     
+    local qwen38_running=false
     local qwen36_running=false
     local qwen_running=false
     local nemotron_running=false
-    
-    if docker ps --format '{{.Names}}' | grep -q "^qwen3-6-27b-engine$"; then
+
+    if docker ps --format '{{.Names}}' | grep -q "^qwen3-8-27b-nvfp4-engine$"; then
+        qwen38_running=true
+        echo "  ${GREEN}Qwen3.8-27B-NVFP4${NC}: running (port 8301)"
+    else
+        echo "  ${RED}Qwen3.8-27B-NVFP4${NC}: stopped (port 8301)"
+    fi
+
+    if docker ps --format '{{.Names}}' | grep -q "^qwen3-6-35b-nvfp4-engine$"; then
         qwen36_running=true
         echo "  ${GREEN}Qwen3.6-27B-FP8${NC}: running (port 8301)"
     else
         echo "  ${RED}Qwen3.6-27B-FP8${NC}: stopped (port 8301)"
     fi
-    
+
     if docker ps --format '{{.Names}}' | grep -q "^qwen3-coder-next-engine$"; then
         qwen_running=true
         echo "  ${GREEN}Qwen3-Coder-Next-FP8${NC}: running (port 8300)"
@@ -183,8 +214,10 @@ show_status() {
     fi
     
     echo ""
-    
-    if $qwen36_running; then
+
+    if $qwen38_running; then
+        log_success "Current model: Qwen3.8-27B-NVFP4"
+    elif $qwen36_running; then
         log_success "Current model: Qwen3.6-27B-FP8"
     elif $qwen_running && ! $nemotron_running; then
         log_success "Current model: Qwen3-Coder-Next-FP8"
@@ -196,7 +229,8 @@ show_status() {
         log_info "No models currently running."
         echo ""
         echo "Start a model with:"
-        echo "  $0 qwen3.6  — Start Qwen3.6-27B-FP8 (default)"
+        echo "  $0 qwen3.8  — Start Qwen3.8-27B-NVFP4 (default)"
+        echo "  $0 qwen3.6  — Start Qwen3.6-27B-FP8 (rollback)"
         echo "  $0 qwen     — Start Qwen3-Coder-Next-FP8"
         echo "  $0 nemotron — Start Nemotron-3-Super-120B-A12B-NVFP4"
     fi
@@ -212,12 +246,14 @@ show_help() {
     echo "  $0 --help      — Show this help message"
     echo ""
     echo "Models:"
-    echo "  qwen3.6   — Qwen3.6-27B-FP8 (default, 27B dense, vision-enabled)"
+    echo "  qwen3.8   — Qwen3.8-27B-NVFP4 (default, 27B dense, vision-enabled)"
+    echo "  qwen3.6   — Qwen3.6-27B-FP8 (rollback, 27B dense, vision-enabled)"
     echo "  qwen      — Qwen3-Coder-Next-FP8 (80B total, FP8 quant)"
     echo "  nemotron  — Nemotron-3-Super-120B-A12B-NVFP4 (NVFP4 quant)"
     echo ""
     echo "Examples:"
-    echo "  $0 qwen3.6    # Switch to Qwen3.6-27B-FP8 (default)"
+    echo "  $0 qwen3.8    # Switch to Qwen3.8-27B-NVFP4 (default)"
+    echo "  $0 qwen3.6    # Switch to Qwen3.6-27B-FP8 (rollback)"
     echo "  $0 qwen       # Switch to Qwen3-Coder-Next-FP8"
     echo "  $0 nemotron   # Switch to Nemotron-3-Super-120B"
     echo "  $0 status     # Check which model is running"
@@ -231,6 +267,11 @@ main() {
     fi
 
     case "${1:-help}" in
+        qwen3.8|Qwen3.8|QWEN3.8)
+            check_env
+            check_env_vars
+            switch_to_qwen38
+            ;;
         qwen3.6|Qwen3.6|QWEN3.6)
             check_env
             check_env_vars
