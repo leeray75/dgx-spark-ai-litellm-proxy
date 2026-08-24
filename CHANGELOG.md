@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Investigated (not fixed — no working fix currently exists)
+
+- **Qwen3.8 generation throughput ~20 tok/s vs. qwen3.6's ~40 tok/s.** Measured: median 19.5-20.1 tok/s over
+  real (non-cached) generations, with 96% GPU utilization but only ~34W power draw — the GPU stays busy without
+  doing much real compute per unit time, not a saturated/well-fed GPU. Root cause: vLLM auto-selects
+  `FlashInferCutlassNvFp4LinearKernel` (NVFP4) and `CutlassFP8ScaledMMLinearKernel` + a vendored/fallback
+  DeepGEMM (FP8) for this checkpoint's compressed-tensors quantization — likely immature/untuned for GB10's
+  SM121 (consumer/workstation Blackwell), the same category of issue qwen3.6's file already documented for its
+  own (different) ModelOpt NVFP4 scheme.
+  - Tried `VLLM_NVFP4_GEMM_BACKEND=marlin` alone (qwen3.6's fix for the analogous issue): **no effect**. Confirmed
+    via kernel-selection log (identical before/after) and a real re-measurement (still 20.1 tok/s). This env var
+    is ModelOpt-scheme-specific, not read by the compressed-tensors scheme qwen3.8 uses.
+  - Tried `--linear-backend marlin` + the undocumented `VLLM_TEST_FORCE_FP8_MARLIN=1` (forces both NVFP4 and FP8
+    layers through Marlin — confirmed via log that kernel selection *did* change this time): **crashed on every
+    boot** with `AttributeError: 'ParallelLMHead' object has no attribute 'output_size_per_partition'` in vLLM's
+    `prepare_fp8_layer_for_marlin()`. Root cause: this checkpoint's `lm_head` is itself FP8-quantized (per the HF
+    model card), and vLLM's Marlin FP8 weight-prep path doesn't handle the `ParallelLMHead` layer type — a real
+    vLLM bug for this specific model, not a config problem. Reverted immediately (container was crash-looping);
+    confirmed back to the working ~20 tok/s baseline via kernel-selection log and a health check.
+  - **Conclusion**: no working lever currently exists in this vLLM build to change kernel selection for this
+    checkpoint. This is a software/kernel-library maturity gap (vLLM/CUTLASS SM121 support for compressed-tensors
+    NVFP4+FP8), **not a hardware limitation** — does not require a new NVIDIA driver/firmware release. Re-test
+    after pulling a newer `vllm/vllm-openai:nightly`; full findings are in `docker-compose.qwen3.8.yml`'s env
+    block comments.
+
 ### Added
 
 - **New default model: `unsloth/Qwen3.8-27B-NVFP4`** (`docker-compose.qwen3.8.yml`). Dense (not MoE) hybrid

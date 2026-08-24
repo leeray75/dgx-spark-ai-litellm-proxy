@@ -483,12 +483,49 @@ services:
       FLASHINFER_DISABLE_VERSION_CHECK: "1"
       CUTE_DSL_ARCH: sm_121a                # GB10 Blackwell SM architecture — hardware fact, model-independent
       VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
-      # UNVERIFIED for this checkpoint's compressed-tensors NVFP4 scheme —
-      # qwen3.6's file needed this for its (different) ModelOpt NVFP4 scheme
-      # to avoid "Failed to find a kernel that can implement the ScaledMM
-      # linear layer" on SM121. Leave commented out for the first boot; if
-      # you see that exact error, uncomment and recreate the container.
-      # VLLM_NVFP4_GEMM_BACKEND: marlin
+      # THROUGHPUT INVESTIGATION (2026-08-23) — CONCLUDED, both levers tried
+      # and reverted. Measured baseline: median generation throughput 19.5-
+      # 20.1 tok/s vs qwen3.6's ~40 tok/s, with 96% GPU utilization but only
+      # ~34W power draw during generation (GPU kept busy without doing much
+      # real compute per unit time — consistent with immature SM121 kernel
+      # support for this quantization scheme, not a hardware ceiling).
+      #
+      #   Tried: VLLM_NVFP4_GEMM_BACKEND=marlin alone. NO EFFECT — kernel-
+      #   selection log was identical before/after ("Using
+      #   FlashInferCutlassNvFp4LinearKernel for NVFP4 GEMM"), and a real
+      #   (non-cached) generation measured the same 20.1 tok/s. This env var
+      #   is specific to the ModelOpt quantization scheme (qwen3.6's
+      #   checkpoint) and is not read by the compressed-tensors NVFP4-pack
+      #   scheme this checkpoint uses.
+      #
+      #   Tried: --linear-backend marlin + VLLM_TEST_FORCE_FP8_MARLIN=1
+      #   together (forces BOTH NVFP4 and FP8 layers through Marlin —
+      #   confirmed via log: "Selected MarlinFP8ScaledMMLinearKernel for
+      #   CompressedTensorsW8A8Fp8" / "Using MarlinNvFp4LinearKernel for
+      #   NVFP4 GEMM", so the flag *was* respected this time, unlike the
+      #   NVFP4-only attempt above). CRASHED on every boot attempt:
+      #     AttributeError: 'ParallelLMHead' object has no attribute
+      #     'output_size_per_partition'
+      #   in vllm/model_executor/layers/quantization/utils/marlin_utils_fp8.py
+      #   prepare_fp8_layer_for_marlin(). Root cause: this checkpoint's
+      #   lm_head is itself FP8-quantized (per the HF model card), and
+      #   vLLM's Marlin FP8 weight-prep path doesn't handle the
+      #   ParallelLMHead layer type — a real vLLM bug for this specific
+      #   model, not a config problem. Different failure mode than qwen3.6
+      #   hit trying the same flag (qwen3.6's GDN attention projection
+      #   layers failed a different way) — same flag, same hardware, two
+      #   different incompatibilities on two different checkpoints.
+      #
+      #   CONCLUSION: no working lever currently exists in this vLLM build
+      #   to change kernel selection for this checkpoint away from the
+      #   default (Cutlass NVFP4 + Cutlass/DeepGEMM FP8). The ~20 tok/s
+      #   baseline appears to require either (a) a newer vLLM/CUTLASS build
+      #   with better SM121-tuned kernels for compressed-tensors NVFP4+FP8,
+      #   or (b) a fix to the Marlin FP8 lm_head bug found above, upstream.
+      #   Neither requires a new NVIDIA driver/firmware release — this is a
+      #   software/kernel-library maturity gap, not a hardware limitation.
+      #   Re-test after pulling a newer vllm/vllm-openai:nightly.
+      #
       # ESCAPE HATCH (leave commented): if generation output looks wrong
       # after a FlashInfer autotune cache load on a newer nightly, uncomment
       # to disable the persistent cache and report upstream.
