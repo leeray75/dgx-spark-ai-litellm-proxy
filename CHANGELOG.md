@@ -4,6 +4,62 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Qwen3.6 is the default/primary model again, Qwen3.8 is now experimental** (2026-08-24, reverting the
+  2026-08-23 attempt to make qwen3.8 the default). Driven by two findings: qwen3.8's throughput investigation
+  (below) found no working fix for its ~20 tok/s vs. qwen3.6's ~40-84 tok/s, and qwen3.8's `--tool-call-parser
+  qwen3_xml` remains unverified against a real Cline/Claude Code tool-calling session. Flipped default/rollback
+  labeling across `README.md`, `CLAUDE.md`, all of `docs/*.md`, `scripts/restart.sh` and `model-switch.sh`
+  (no-arg default now starts qwen3.6), and `litellm-config.yaml` (`default_fallbacks` back to
+  `qwen3.6-35b-a3b`, model_list reordered). `docker-compose.qwen3.8.yml` is unchanged and still fully
+  buildable — nothing about qwen3.8 was removed, only which one starts by default.
+  - Also fixed, while touching `scripts/model-switch.sh`: a second stale-label bug (independent of the earlier
+    stale-container-name bug fixed 2026-08-23) — several strings still said "Qwen3.6-27B-FP8" instead of
+    "Qwen3.6-35B-A3B-NVFP4", left over from before that model was renamed.
+
+- **`docker-compose.qwen3.6.yml`: `--gpu-memory-utilization` 0.4 → 0.6 (real incident, 2026-08-24).**
+  Root cause was *not* this file — it was collateral damage from the qwen3.8 throughput investigation below,
+  which ran `docker pull vllm/vllm-openai:nightly` to test a newer build. Since both `docker-compose.qwen3.6.yml`
+  and `docker-compose.qwen3.8.yml` reference the **mutable** `:nightly` tag rather than a pinned digest, that
+  pull silently upgraded qwen3.6's engine too on its next restart — to vLLM `0.26.1rc1.dev1102+ge9d1398d9`, a
+  build this file's `0.4` value was never validated against. Reproduced the exact same
+  `ValueError: No available memory for the cache blocks` crash qwen3.8 hit, for the identical reason (CUDA-graph
+  memory profiling leaving zero real KV cache headroom at the old value on the new build). Fixed the same way,
+  for parity: `0.6`, confirmed working with 24.54 GiB KV cache available at boot. Documented as corrections-
+  history item 18 in the compose file itself, and as a new troubleshooting entry (§4b) with the exact error
+  text. **Neither compose file is pinned to a digest yet** — that's the real fix still outstanding; both remain
+  vulnerable to this exact class of regression from any future `:nightly` pull for either stack.
+  - Real measured throughput post-fix: two independent wall-clock tests (700 tokens/8.4s and 1800 tokens/21.5s)
+    both landed at ~83.7-83.74 tok/s — reproducible, not noise, and higher than the ~40 tok/s originally
+    reported. The engine's own internal log-based average was noisier (35.6 tok/s median over 5 samples,
+    likely including a partial post-boot ramp-up window).
+
+### Investigated (not fixed — no working fix currently exists)
+
+- **Qwen3.8 generation throughput ~20 tok/s vs. qwen3.6's ~40 tok/s.** Measured: median 19.5-20.1 tok/s over
+  real (non-cached) generations, with 96% GPU utilization but only ~34W power draw — the GPU stays busy without
+  doing much real compute per unit time, not a saturated/well-fed GPU. Root cause: vLLM auto-selects
+  `FlashInferCutlassNvFp4LinearKernel` (NVFP4) and `CutlassFP8ScaledMMLinearKernel` + a vendored/fallback
+  DeepGEMM (FP8) for this checkpoint's compressed-tensors quantization — likely immature/untuned for GB10's
+  SM121 (consumer/workstation Blackwell), the same category of issue qwen3.6's file already documented for its
+  own (different) ModelOpt NVFP4 scheme.
+  - Tried `VLLM_NVFP4_GEMM_BACKEND=marlin` alone (qwen3.6's fix for the analogous issue): **no effect**. Confirmed
+    via kernel-selection log (identical before/after) and a real re-measurement (still 20.1 tok/s). This env var
+    is ModelOpt-scheme-specific, not read by the compressed-tensors scheme qwen3.8 uses.
+  - Tried `--linear-backend marlin` + the undocumented `VLLM_TEST_FORCE_FP8_MARLIN=1` (forces both NVFP4 and FP8
+    layers through Marlin — confirmed via log that kernel selection *did* change this time): **crashed on every
+    boot** with `AttributeError: 'ParallelLMHead' object has no attribute 'output_size_per_partition'` in vLLM's
+    `prepare_fp8_layer_for_marlin()`. Root cause: this checkpoint's `lm_head` is itself FP8-quantized (per the HF
+    model card), and vLLM's Marlin FP8 weight-prep path doesn't handle the `ParallelLMHead` layer type — a real
+    vLLM bug for this specific model, not a config problem. Reverted immediately (container was crash-looping);
+    confirmed back to the working ~20 tok/s baseline via kernel-selection log and a health check.
+  - **Conclusion**: no working lever currently exists in this vLLM build to change kernel selection for this
+    checkpoint. This is a software/kernel-library maturity gap (vLLM/CUTLASS SM121 support for compressed-tensors
+    NVFP4+FP8), **not a hardware limitation** — does not require a new NVIDIA driver/firmware release. Re-test
+    after pulling a newer `vllm/vllm-openai:nightly`; full findings are in `docker-compose.qwen3.8.yml`'s env
+    block comments.
+
 ### Added
 
 - **New default model: `unsloth/Qwen3.8-27B-NVFP4`** (`docker-compose.qwen3.8.yml`). Dense (not MoE) hybrid

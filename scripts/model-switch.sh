@@ -1,11 +1,11 @@
 #!/bin/bash
 # =============================================================================
-# model-switch.sh — Switch between AI models (Qwen3.8-27B-NVFP4, Qwen3.6-27B-FP8,
+# model-switch.sh — Switch between AI models (Qwen3.6-35B-A3B-NVFP4, Qwen3.8-27B-NVFP4,
 # Qwen3-Coder-Next-FP8, and Nemotron-3-Super-120B)
 #
 # Usage:
-#   ./model-switch.sh qwen3.8  — Switch to Qwen3.8-27B-NVFP4 (DEFAULT)
-#   ./model-switch.sh qwen3.6  — Switch to Qwen3.6-27B-FP8 (rollback)
+#   ./model-switch.sh qwen3.6  — Switch to Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
+#   ./model-switch.sh qwen3.8  — Switch to Qwen3.8-27B-NVFP4 (experimental)
 #   ./model-switch.sh qwen     — Switch to Qwen3-Coder-Next-FP8
 #   ./model-switch.sh nemotron — Switch to Nemotron-3-Super-120B-A12B-NVFP4
 #   ./model-switch.sh status   — Show current model status
@@ -107,7 +107,7 @@ stop_all() {
     fi
 }
 
-# Switch to Qwen3.8-27B-NVFP4 (DEFAULT)
+# Switch to Qwen3.8-27B-NVFP4 (experimental — see CHANGELOG.md for the throughput investigation)
 switch_to_qwen38() {
     log_info "Switching to Qwen3.8-27B-NVFP4..."
     stop_all
@@ -124,21 +124,21 @@ switch_to_qwen38() {
     echo "  Model:          unsloth/Qwen3.8-27B-NVFP4"
 }
 
-# Switch to Qwen3.6-27B-FP8 (rollback)
+# Switch to Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
 switch_to_qwen36() {
-    log_info "Switching to Qwen3.6-27B-FP8..."
+    log_info "Switching to Qwen3.6-35B-A3B-NVFP4..."
     stop_all
 
-    log_info "Starting Qwen3.6-27B-FP8 engine (port 8301)..."
+    log_info "Starting Qwen3.6-35B-A3B-NVFP4 engine (port 8301)..."
     docker compose -f "$COMPOSE_QWEN36" up -d
 
-    log_success "✓ Switched to Qwen3.6-27B-FP8"
+    log_success "✓ Switched to Qwen3.6-35B-A3B-NVFP4"
     echo ""
     echo "Access points:"
     echo "  Langfuse UI:    http://localhost:3000"
     echo "  LiteLLM API:    http://localhost:4000"
     echo "  vLLM Engine:    http://localhost:8301/v1"
-    echo "  Model:          Qwen/Qwen3.6-27B-FP8"
+    echo "  Model:          nvidia/Qwen3.6-35B-A3B-NVFP4"
 }
 
 # Switch to Qwen3-Coder-Next-FP8
@@ -194,9 +194,9 @@ show_status() {
 
     if docker ps --format '{{.Names}}' | grep -q "^qwen3-6-35b-nvfp4-engine$"; then
         qwen36_running=true
-        echo "  ${GREEN}Qwen3.6-27B-FP8${NC}: running (port 8301)"
+        echo "  ${GREEN}Qwen3.6-35B-A3B-NVFP4${NC}: running (port 8301)"
     else
-        echo "  ${RED}Qwen3.6-27B-FP8${NC}: stopped (port 8301)"
+        echo "  ${RED}Qwen3.6-35B-A3B-NVFP4${NC}: stopped (port 8301)"
     fi
 
     if docker ps --format '{{.Names}}' | grep -q "^qwen3-coder-next-engine$"; then
@@ -218,7 +218,7 @@ show_status() {
     if $qwen38_running; then
         log_success "Current model: Qwen3.8-27B-NVFP4"
     elif $qwen36_running; then
-        log_success "Current model: Qwen3.6-27B-FP8"
+        log_success "Current model: Qwen3.6-35B-A3B-NVFP4"
     elif $qwen_running && ! $nemotron_running; then
         log_success "Current model: Qwen3-Coder-Next-FP8"
     elif $nemotron_running && ! $qwen_running; then
@@ -229,8 +229,8 @@ show_status() {
         log_info "No models currently running."
         echo ""
         echo "Start a model with:"
-        echo "  $0 qwen3.8  — Start Qwen3.8-27B-NVFP4 (default)"
-        echo "  $0 qwen3.6  — Start Qwen3.6-27B-FP8 (rollback)"
+        echo "  $0 qwen3.6  — Start Qwen3.6-35B-A3B-NVFP4 (default)"
+        echo "  $0 qwen3.8  — Start Qwen3.8-27B-NVFP4 (experimental)"
         echo "  $0 qwen     — Start Qwen3-Coder-Next-FP8"
         echo "  $0 nemotron — Start Nemotron-3-Super-120B-A12B-NVFP4"
     fi
@@ -246,14 +246,14 @@ show_help() {
     echo "  $0 --help      — Show this help message"
     echo ""
     echo "Models:"
-    echo "  qwen3.8   — Qwen3.8-27B-NVFP4 (default, 27B dense, vision-enabled)"
-    echo "  qwen3.6   — Qwen3.6-27B-FP8 (rollback, 27B dense, vision-enabled)"
+    echo "  qwen3.6   — Qwen3.6-35B-A3B-NVFP4 (default, 35B MoE 3B activated, text-only)"
+    echo "  qwen3.8   — Qwen3.8-27B-NVFP4 (experimental, 27B dense, vision-enabled)"
     echo "  qwen      — Qwen3-Coder-Next-FP8 (80B total, FP8 quant)"
     echo "  nemotron  — Nemotron-3-Super-120B-A12B-NVFP4 (NVFP4 quant)"
     echo ""
     echo "Examples:"
-    echo "  $0 qwen3.8    # Switch to Qwen3.8-27B-NVFP4 (default)"
-    echo "  $0 qwen3.6    # Switch to Qwen3.6-27B-FP8 (rollback)"
+    echo "  $0 qwen3.6    # Switch to Qwen3.6-35B-A3B-NVFP4 (default)"
+    echo "  $0 qwen3.8    # Switch to Qwen3.8-27B-NVFP4 (experimental)"
     echo "  $0 qwen       # Switch to Qwen3-Coder-Next-FP8"
     echo "  $0 nemotron   # Switch to Nemotron-3-Super-120B"
     echo "  $0 status     # Check which model is running"

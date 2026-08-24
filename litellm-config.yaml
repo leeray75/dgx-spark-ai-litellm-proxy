@@ -8,18 +8,22 @@
 # health checks / requests until that stack is started — this is the existing
 # design, not something new here.
 #
-# qwen3.8-27b is the new PRIMARY/DEFAULT entry (docker-compose.qwen3.8.yml,
-# port 8301, --served-model-name qwen3.8-27b → openai/qwen3.8-27b).
-# qwen3.6-35b-a3b is KEPT (not deleted) for rollback — if you ever bring
-# docker-compose.qwen3.6.yml back up, its alias still works.
+# qwen3.6-35b-a3b is the PRIMARY/DEFAULT entry (docker-compose.qwen3.6.yml,
+# port 8301, --served-model-name qwen3.6-35b-a3b → openai/qwen3.6-35b-a3b).
+# qwen3.8-27b is KEPT (not deleted), reachable if docker-compose.qwen3.8.yml
+# is brought up instead — but it's EXPERIMENTAL, not the default, as of
+# 2026-08-24: measured throughput ~20 tok/s vs qwen3.6's ~40-84 tok/s with no
+# working fix found (two kernel-backend levers tried, both failed — see
+# CHANGELOG.md), and its --tool-call-parser qwen3_xml is still unverified
+# against a real tool-calling session. See docker-compose.qwen3.8.yml's
+# PROVENANCE and CORRECTIONS HISTORY headers for the full investigation.
 #
-# Model: unsloth/Qwen3.8-27B-NVFP4
-#   27B dense (NOT MoE), NVFP4/FP8 compressed-tensors quantized
+# Model: nvidia/Qwen3.6-35B-A3B-NVFP4
+#   35B MoE (3B activated), NVFP4 quantized (NVIDIA ModelOpt)
 #   Engine port: 8301
-#   Vision support: yes (has a vision encoder, unlike qwen3.6's text-only MoE)
+#   Vision support: no (text-only MoE checkpoint)
 #   Reasoning parser: qwen3 (required to prevent thinking tokens in output)
-#   Tool-call parser: qwen3_xml — CARRIED BY ANALOGY from qwen3.6, unverified
-#     for this model. See docker-compose.qwen3.8.yml's PROVENANCE header.
+#   Tool-call parser: qwen3_xml (official NVIDIA spec for this checkpoint)
 #   max-model-len: 262144 (vLLM --max-model-len; full context window)
 # =============================================================================
 
@@ -34,26 +38,8 @@ model_list:
       model: "anthropic/*"
       api_key: os.environ/ANTHROPIC_API_KEY
 
-  # ── Primary chat model: unsloth/Qwen3.8-27B-NVFP4 ───────────────────────────
-  # docker-compose.qwen3.8.yml, port 8301. Full 262K context window.
-  - model_name: qwen3.8-27b
-    litellm_params:
-      model: openai/qwen3.8-27b
-      api_base: http://qwen3-8-27b-nvfp4-engine:8000/v1
-      api_key: "none"
-    model_info:
-      max_tokens: 262144
-      max_input_tokens: 262144
-      max_output_tokens: 262144
-      supports_tool_choice: true
-      supports_function_calling: true
-      supports_vision: true
-      input_cost_per_token: 0.000000015
-      output_cost_per_token: 0.000000035
-
-  # ── Rollback alias: nvidia/Qwen3.6-35B-A3B-NVFP4 ────────────────────────────
-  # Only reachable if docker-compose.qwen3.6.yml is brought back up instead of
-  # docker-compose.qwen3.8.yml. Kept for rollback, not started by default.
+  # ── Primary chat model: nvidia/Qwen3.6-35B-A3B-NVFP4 ────────────────────────
+  # docker-compose.qwen3.6.yml, port 8301. Full 262K context window.
   - model_name: qwen3.6-35b-a3b
     litellm_params:
       model: openai/qwen3.6-35b-a3b
@@ -66,6 +52,24 @@ model_list:
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: false
+      input_cost_per_token: 0.000000015
+      output_cost_per_token: 0.000000035
+
+  # ── Experimental alias: unsloth/Qwen3.8-27B-NVFP4 ───────────────────────────
+  # Only reachable if docker-compose.qwen3.8.yml is brought up instead of
+  # docker-compose.qwen3.6.yml. Not the default — see file header for why.
+  - model_name: qwen3.8-27b
+    litellm_params:
+      model: openai/qwen3.8-27b
+      api_base: http://qwen3-8-27b-nvfp4-engine:8000/v1
+      api_key: "none"
+    model_info:
+      max_tokens: 262144
+      max_input_tokens: 262144
+      max_output_tokens: 262144
+      supports_tool_choice: true
+      supports_function_calling: true
+      supports_vision: true
       input_cost_per_token: 0.000000015
       output_cost_per_token: 0.000000035
 
@@ -107,7 +111,7 @@ litellm_settings:
   # entry in `fallbacks`, retry against the local primary engine. Applies to
   # anthropic/* passthrough failures (Anthropic API down/rate-limited) as well
   # as any other unmapped model group.
-  default_fallbacks: ["qwen3.8-27b"]
+  default_fallbacks: ["qwen3.6-35b-a3b"]
   turn_off_message_logging: false
   callbacks: ["langfuse_otel"]
 

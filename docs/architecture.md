@@ -75,8 +75,8 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 
 | Service | Image | Port | Model | Quantization |
 |---------|-------|------|-------|--------------|
-| Qwen3.8 Engine (default) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.8-27B-NVFP4 | NVFP4+FP8 (compressed-tensors) |
-| Qwen3.6 Engine (rollback) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 (ModelOpt) |
+| Qwen3.8 Engine (experimental) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.8-27B-NVFP4 | NVFP4+FP8 (compressed-tensors) |
+| Qwen3.6 Engine (default) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 (ModelOpt) |
 | Embedding Engine | `vllm/vllm-openai:nightly` | 8302 | nemotron-3-embed-1b-nvfp4 | NVFP4 |
 | Qwen3-Coder Engine | `vllm/vllm-openai:v0.19.1-cu130` | 8300 | Qwen3-Coder-Next-FP8 | FP8 |
 | Nemotron Engine | `vllm/vllm-openai:v0.18.1-cu130` | 8200 | Nemotron-3-Super-120B | NVFP4 |
@@ -105,7 +105,7 @@ All services connect via a Docker bridge network called `ai-bridge`:
 |------|---------|---------------|---------|
 | 3000 | Langfuse Web | External | Web UI, API |
 | 4000 | LiteLLM | External | OpenAI-compatible API |
-| 8301 | Qwen3.8 Engine (default) / Qwen3.6 Engine (rollback) | External | Direct vLLM access — mutually exclusive, whichever stack is running |
+| 8301 | Qwen3.6 Engine (default) / Qwen3.8 Engine (experimental) | External | Direct vLLM access — mutually exclusive, whichever stack is running |
 | 8302 | Embedding Engine | External | Direct vLLM access (embeddings) |
 | 8300 | Qwen3-Coder Engine | External | Direct vLLM access (Qwen3-Coder) |
 | 8200 | Nemotron Engine | External | Direct vLLM access |
@@ -129,7 +129,7 @@ All services connect via a Docker bridge network called `ai-bridge`:
 
 ## Model Details
 
-### Qwen3.8-27B-NVFP4 (DEFAULT)
+### Qwen3.8-27B-NVFP4 (EXPERIMENTAL — see throughput note in Model Comparison below)
 
 - **Size**: 27B total parameters, dense (not MoE — all params active)
 - **Architecture**: Hybrid Gated-DeltaNet + Gated-Attention, with vision encoder
@@ -142,7 +142,7 @@ All services connect via a Docker bridge network called `ai-bridge`:
   model), `--load-format fastsafetensors`, no `--quantization`/`--moe-backend` flags needed (dense,
   auto-detected quantization). See `docker-compose.qwen3.8.yml`'s PROVENANCE header for full detail.
 
-### Qwen3.6-35B-A3B-NVFP4 (ROLLBACK)
+### Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
 
 - **Size**: 35B total parameters, 3B active (MoE)
 - **Architecture**: Hybrid Attention + MoE

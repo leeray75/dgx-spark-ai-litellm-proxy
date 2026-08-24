@@ -8,18 +8,23 @@ An OpenAI-compatible LLM proxy stack running on an **NVIDIA DGX Spark (Blackwell
 
 The four selectable chat models cannot run simultaneously — only one chat inference engine is active at a time due to GPU memory constraints. The `nemotron-3-embed-1b-nvfp4` embedding engine is small enough (~1.14B params) to run alongside whichever chat engine is active; it's wired into both `docker-compose.qwen3.8.yml` and `docker-compose.qwen3.6.yml`.
 
-`docker-compose.qwen3.6.yml` is kept for rollback only — `docker-compose.qwen3.8.yml` is the default/primary stack (2026-08-23).
+`docker-compose.qwen3.6.yml` is the default/primary stack again as of 2026-08-24 (reverted from a brief 2026-08-23
+attempt at making qwen3.8 the default). Reason: qwen3.8 measured at ~20 tok/s vs. qwen3.6's ~40-84 tok/s with no
+working fix found (see CHANGELOG.md and `docker-compose.qwen3.8.yml`'s own header for the full investigation),
+and qwen3.8's `--tool-call-parser qwen3_xml` is still unverified against a real Cline/Claude Code tool-calling
+session. `docker-compose.qwen3.8.yml` is kept, fully wired and buildable, as the experimental/next-to-revisit
+option — not deleted, just not the default.
 
 ## Stack Management
 
 ### Starting the stack
 
 ```bash
-# Default model (Qwen3.8-27B-NVFP4) — recommended
-docker compose -f docker-compose.qwen3.8.yml up -d
-
-# Qwen3.6-35B-A3B-NVFP4 (rollback)
+# Default model (Qwen3.6-35B-A3B-NVFP4) — recommended
 docker compose -f docker-compose.qwen3.6.yml up -d
+
+# Qwen3.8-27B-NVFP4 (experimental — see throughput note above)
+docker compose -f docker-compose.qwen3.8.yml up -d
 
 # Qwen3-Coder-Next-FP8 (80B MoE, coding-focused)
 docker compose up -d
@@ -31,9 +36,9 @@ docker compose -f docker-compose.nemotron.yml up -d
 ### Full restart with cache clearing (the "Ritual")
 
 ```bash
-./scripts/restart.sh              # restarts Qwen3.8 (default)
-./scripts/restart.sh qwen3.8      # Qwen3.8-27B-NVFP4
-./scripts/restart.sh qwen3.6      # Qwen3.6-35B-A3B-NVFP4 (rollback)
+./scripts/restart.sh              # restarts Qwen3.6 (default)
+./scripts/restart.sh qwen3.6      # Qwen3.6-35B-A3B-NVFP4
+./scripts/restart.sh qwen3.8      # Qwen3.8-27B-NVFP4 (experimental)
 ./scripts/restart.sh qwen         # Qwen3-Coder-Next-FP8
 ./scripts/restart.sh nemotron     # Nemotron-3-Super-120B
 ./scripts/restart.sh status       # show container health
@@ -45,8 +50,8 @@ The restart script drops system caches (`sync; echo 3 > /proc/sys/vm/drop_caches
 ### Switching models
 
 ```bash
-./scripts/model-switch.sh qwen3.8   # switch without full restart (default)
-./scripts/model-switch.sh qwen3.6   # rollback
+./scripts/model-switch.sh qwen3.6   # switch without full restart (default)
+./scripts/model-switch.sh qwen3.8   # experimental
 ./scripts/model-switch.sh qwen
 ./scripts/model-switch.sh nemotron
 ./scripts/model-switch.sh status
@@ -58,7 +63,7 @@ The restart script drops system caches (`sync; echo 3 > /proc/sys/vm/drop_caches
 
 ```bash
 docker compose ps
-docker compose logs -f <service>   # e.g. litellm, qwen3-8-27b-nvfp4-engine
+docker compose logs -f <service>   # e.g. litellm, qwen3-6-35b-nvfp4-engine
 ```
 
 ## Configuration Files
@@ -67,8 +72,8 @@ docker compose logs -f <service>   # e.g. litellm, qwen3-8-27b-nvfp4-engine
 |------|---------|
 | `litellm-config.yaml` | LiteLLM model routing, Redis cache, Langfuse OTEL callbacks |
 | `docker-compose.yml` | Qwen3-Coder-Next-FP8 stack |
-| `docker-compose.qwen3.8.yml` | Qwen3.8-27B-NVFP4 stack (default) |
-| `docker-compose.qwen3.6.yml` | Qwen3.6-35B-A3B-NVFP4 stack (rollback) |
+| `docker-compose.qwen3.6.yml` | Qwen3.6-35B-A3B-NVFP4 stack (default) |
+| `docker-compose.qwen3.8.yml` | Qwen3.8-27B-NVFP4 stack (experimental — see throughput note above) |
 | `docker-compose.nemotron.yml` | Nemotron-3-Super-120B stack |
 | `.env` | All secrets and credentials (copy from `.env.sample`) |
 | `clickhouse-config.xml` | ClickHouse memory cap and server settings |
@@ -124,10 +129,19 @@ Each compose file pins a different vLLM image — do not swap these:
 
 | Compose file | vLLM image | Notes |
 |---|---|---|
-| `docker-compose.qwen3.8.yml` | `vllm/vllm-openai:nightly` (ARM64) | Pulled/verified 2026-08-23 (digest `sha256:95bed119…`, vLLM `0.26.1rc1.dev1102+ge9d1398d9`) — confirmed via live registry introspection to register `Qwen3_5ForConditionalGeneration`, the architecture class this checkpoint's config.json declares |
-| `docker-compose.qwen3.6.yml` | `vllm/vllm-openai:nightly` (ARM64) | Must be post-2026-05-31 for persistent FlashInfer autotune cache |
+| `docker-compose.qwen3.6.yml` | `vllm/vllm-openai:nightly` (ARM64) | Currently digest `sha256:95bed119…` (vLLM `0.26.1rc1.dev1102+ge9d1398d9`) — see the pinning warning below |
+| `docker-compose.qwen3.8.yml` | `vllm/vllm-openai:nightly` (ARM64) | Same digest as above — confirmed via live registry introspection to register `Qwen3_5ForConditionalGeneration`, the architecture class this checkpoint's config.json declares |
 | `docker-compose.yml` | `vllm/vllm-openai:v0.19.1-cu130` | Pinned for GDN/Mamba stability |
 | `docker-compose.nemotron.yml` | `vllm/vllm-openai:v0.18.1-cu130` | Nemotron requires v0.18.1, not v0.19.1 |
+
+> **⚠️ Tag-pinning warning (2026-08-24 incident):** `docker-compose.qwen3.6.yml` and `docker-compose.qwen3.8.yml`
+> both reference the **mutable** `:nightly` tag, not a pinned digest. A `docker pull vllm/vllm-openai:nightly` run
+> to investigate qwen3.8's throughput silently upgraded qwen3.6's engine too on its next restart — to a build it
+> had never been validated against — and reproduced the exact same `gpu_memory_utilization` OOM qwen3.8 hit
+> (fixed the same way: `0.4` → `0.6` on both files). **Before running `docker pull vllm/vllm-openai:nightly`
+> again, know that it affects both stacks simultaneously.** Neither file has a recorded pinned digest yet
+> (`docker-compose.qwen3.6.yml`'s header still has an unfilled "Pinned working digest:" placeholder) — pinning
+> both to the current known-working digest is the real fix, not yet done.
 
 ## Model Names and Aliases
 
@@ -135,26 +149,26 @@ Each compose file pins a different vLLM image — do not swap these:
 
 | Alias | Backend | Purpose |
 |-------|---------|---------|
-| `qwen3.8-27b` | Qwen3.8-27B-NVFP4 (Unsloth) | **Default.** Direct access (262K context), vision-capable |
-| `qwen3.6-35b-a3b` | Qwen3.6-35B-A3B-NVFP4 | Rollback alias — only reachable if `docker-compose.qwen3.6.yml` is running |
+| `qwen3.6-35b-a3b` | Qwen3.6-35B-A3B-NVFP4 | **Default.** Direct access (262K context) |
+| `qwen3.8-27b` | Qwen3.8-27B-NVFP4 (Unsloth) | Experimental, vision-capable — only reachable if `docker-compose.qwen3.8.yml` is running; see throughput note above |
 | `qwen3-coder-next` | Qwen3-Coder-Next-FP8 | 80B MoE coder (262K context) |
 | `nemotron-super` | Nemotron-3-Super-120B | General reasoning (262K context) |
 | `nemotron-3-embed-1b-nvfp4` | Nemotron-3-Embed-1B-NVFP4 | Text-only embedding, 2048-dim, NVFP4 (`/v1/embeddings`); requires manual `query:`/`passage:` input prefix |
 
-> **Note:** The `anthropic/*` wildcard passthrough (added v1.4.0) routes all Claude model IDs — including future releases and any alias Claude Code/Desktop introduces — directly to Anthropic's real API via the proxy. A `default_fallbacks` entry sends failed requests to the local default engine (`qwen3.8-27b`). This replaces the older approach of using individual `claude-sonnet-4-6` / `claude-haiku-4-6` proxy aliases (removed in v1.3.0).
+> **Note:** The `anthropic/*` wildcard passthrough (added v1.4.0) routes all Claude model IDs — including future releases and any alias Claude Code/Desktop introduces — directly to Anthropic's real API via the proxy. A `default_fallbacks` entry sends failed requests to the local default engine (`qwen3.6-35b-a3b`). This replaces the older approach of using individual `claude-sonnet-4-6` / `claude-haiku-4-6` proxy aliases (removed in v1.3.0).
 
 ## Key vLLM Flags by Model
 
-- **Qwen3.8** (default): `--reasoning-parser qwen3`; `--speculative-config '{"method":"mtp","num_speculative_tokens":2}'` (no `moe_backend` key — this checkpoint is dense, not MoE); `--gpu-memory-utilization 0.4` (conservative carry-over from qwen3.6, not yet re-measured for this smaller/dense checkpoint); `--tool-call-parser qwen3_xml` (carried by analogy from qwen3.6, **unverified** for this model — first thing to check if Cline/Claude Code tool calls fail to parse); no `--quantization` flag (compressed-tensors NVFP4/FP8 auto-detected from checkpoint). See `docker-compose.qwen3.8.yml`'s PROVENANCE header for the full verified-vs-assumed breakdown.
-- **Qwen3.6** (rollback): `--reasoning-parser qwen3` required (prevents thinking tokens leaking); `--speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'`; `--gpu-memory-utilization 0.4` (official NVIDIA spec); `--tool-call-parser qwen3_xml` (official NVIDIA spec); `--load-format fastsafetensors`
+- **Qwen3.6** (default): `--reasoning-parser qwen3` required (prevents thinking tokens leaking); `--speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}'`; `--gpu-memory-utilization 0.6` (corrected from `0.4` on 2026-08-24 — see the tag-pinning warning above; `0.4` was the official NVIDIA spec value but stopped working once the engine landed on a newer nightly build); `--tool-call-parser qwen3_xml` (official NVIDIA spec); `--load-format fastsafetensors`. Real measured throughput post-fix: ~84 tok/s wall-clock (reproducible across two independent test generations), 24.54 GiB KV cache available at boot.
   - `--max-num-batched-tokens 8192` matches the official DGX Spark spec but reduces Cline large-context ingestion throughput vs. the previous value of `262144`. If Cline latency regresses noticeably under real traffic, raising this back toward `262144` is the first lever to pull.
   - `VLLM_NVFP4_GEMM_BACKEND=marlin` env var (not `--linear-backend marlin` — that flag crashes startup on this model due to FP8-quantized GDN attention projection layers).
+- **Qwen3.8** (experimental — see throughput note above): `--reasoning-parser qwen3`; `--speculative-config '{"method":"mtp","num_speculative_tokens":2}'` (no `moe_backend` key — this checkpoint is dense, not MoE); `--gpu-memory-utilization 0.6` (corrected from an initial `0.4` after a real-boot OOM); `--tool-call-parser qwen3_xml` (carried by analogy from qwen3.6, **unverified** for this model — first thing to check if Cline/Claude Code tool calls fail to parse); no `--quantization` flag (compressed-tensors NVFP4/FP8 auto-detected from checkpoint). Measured throughput: ~20 tok/s, with 96% GPU utilization but only ~34W power draw — a kernel-efficiency issue with no working fix found (two levers tried, both failed — see CHANGELOG.md). See `docker-compose.qwen3.8.yml`'s PROVENANCE header for the full verified-vs-assumed breakdown.
 - **Qwen3-Coder-Next**: `--mamba-ssm-cache-dtype float32` required for GDN/SSM layer stability; `--max-cudagraph-capture-size 128` prevents GDN Mamba OOM
 - **Nemotron**: Uses custom reasoning parser plugin at `scripts/super_v3_reasoning_parser.py`; requires vLLM `v0.18.1` (not `v0.19.1`)
 
 ## Memory Budget
 
-All containers share the GB10's 128GB unified memory pool (no separate VRAM). At `--gpu-memory-utilization 0.4`, the vLLM engine reserves ~49GB, leaving ~79GB for the observability stack (Postgres 768M, ClickHouse 3G, Redis 512MB app + 640M container, MinIO 512M, Langfuse web 1.5G, Langfuse worker 1.5G, LiteLLM 1G). This applies to both the qwen3.8 and qwen3.6 stacks, which use the same value; qwen3.8's actual KV cache headroom hasn't been measured yet (see that compose file's PROVENANCE header).
+All containers share the GB10's 128GB unified memory pool (no separate VRAM). At `--gpu-memory-utilization 0.6` (both stacks, as of the 2026-08-24 correction), the vLLM engine reserves ~73GB, leaving ~55GB for the observability stack (Postgres 768M, ClickHouse 3G, Redis 512MB app + 640M container, MinIO 512M, Langfuse web 1.5G, Langfuse worker 1.5G, LiteLLM 1G). Measured KV cache headroom at boot: qwen3.6 ~24.54 GiB, qwen3.8 ~13.96 GiB.
 
 `langfuse-web` and `langfuse-worker` both use `NODE_OPTIONS: --max-old-space-size=1024` to cap V8's heap at 1024MB. Without this explicit cap, V8 ignores the Docker memory cgroup limit and OOMs under real trace-ingestion load — idle `docker stats` readings are not a reliable proxy for load-time memory usage.
 
@@ -165,9 +179,9 @@ All containers share the GB10's 128GB unified memory pool (no separate VRAM). At
 | LiteLLM API | http://localhost:4000/v1 |
 | LiteLLM UI | http://localhost:4000/ui |
 | Langfuse UI | http://localhost:3000 |
-| Qwen3.8 Engine (direct, default) | http://localhost:8301/v1 |
-| Qwen3.6 Engine (direct, rollback — same port, mutually exclusive with 3.8) | http://localhost:8301/v1 |
-| Embedding Engine (direct, Qwen3.8/3.6 stacks only) | http://localhost:8302/v1 |
+| Qwen3.6 Engine (direct, default) | http://localhost:8301/v1 |
+| Qwen3.8 Engine (direct, experimental — same port, mutually exclusive with 3.6) | http://localhost:8301/v1 |
+| Embedding Engine (direct, Qwen3.6/3.8 stacks only) | http://localhost:8302/v1 |
 | Qwen3-Coder Engine (direct) | http://localhost:8300/v1 |
 | Nemotron Engine (direct) | http://localhost:8200/v1 |
 | MinIO Console | http://localhost:9091 |
@@ -190,7 +204,7 @@ cp .env.sample .env
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -d '{"model": "qwen3.8-27b", "messages": [{"role": "user", "content": "Hello"}]}'
+  -d '{"model": "qwen3.6-35b-a3b", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
 
 ```bash
@@ -202,7 +216,7 @@ curl http://localhost:4000/v1/embeddings \
 
 Engine health check (skip LiteLLM):
 ```bash
-curl http://localhost:8301/health   # Qwen3.8 (default) or Qwen3.6 (rollback) — whichever stack is up
+curl http://localhost:8301/health   # Qwen3.6 (default) or Qwen3.8 (experimental) — whichever stack is up
 curl http://localhost:8302/health   # Embedding engine
 curl http://localhost:8300/health   # Qwen3-Coder
 curl http://localhost:8200/health   # Nemotron
