@@ -4,7 +4,7 @@ This guide compares the supported LLMs for the **NVIDIA DGX Spark (Blackwell GB1
 
 ## Model Overview
 
-### Qwen3.8-27B-NVFP4 (DEFAULT)
+### Qwen3.8-27B-NVFP4 (EXPERIMENTAL — see throughput note in Model Comparison below)
 
 | Attribute | Value |
 |-----------|-------|
@@ -47,7 +47,7 @@ boot) to `0.6` — verified working but not yet a measured optimum.
 
 ---
 
-### Qwen3.6-35B-A3B-NVFP4 (ROLLBACK)
+### Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
 
 | Attribute | Value |
 |-----------|-------|
@@ -192,14 +192,14 @@ boot) to `0.6` — verified working but not yet a measured optimum.
 | **Output Format** | Standard JSON | Standard JSON | Standard JSON | Reasoning blocks | 2048-dim vector |
 | **Vision** | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No |
 | **Tool Calling** | Native (qwen3_xml, unverified) | Native (qwen3_xml) | Native (qwen3_coder) | Requires parser | N/A |
-| **Best For** | Coding (Cline/Claude Code), default | Coding (rollback) | Coding tasks | General reasoning | Embeddings/RAG |
+| **Best For** | Coding (rollback) | Coding (Cline/Claude Code), default | Coding tasks | General reasoning | Embeddings/RAG |
 | **Runs Concurrently** | ❌ | ❌ | ❌ | ❌ | ✅ Yes |
 
 ---
 
 ## Configuration Comparison
 
-### Qwen3.8-27B-NVFP4 (docker-compose.qwen3.8.yml, default)
+### Qwen3.8-27B-NVFP4 (docker-compose.qwen3.8.yml, experimental)
 
 ```yaml
 qwen3-8-27b-nvfp4-engine:
@@ -235,7 +235,7 @@ MoE-specific env vars either — this is a dense model, unlike every other engin
 analogy from qwen3.6 (`--tool-call-parser qwen3_xml` in particular is unverified for this model), and for the
 `--gpu-memory-utilization 0.4 → 0.6` real-boot OOM correction.
 
-### Qwen3.6-35B-A3B-NVFP4 (docker-compose.qwen3.6.yml, rollback)
+### Qwen3.6-35B-A3B-NVFP4 (docker-compose.qwen3.6.yml, default)
 
 ```yaml
 qwen3-6-35b-nvfp4-engine:
@@ -257,7 +257,7 @@ qwen3-6-35b-nvfp4-engine:
     --dtype auto
     --quantization modelopt
     --kv-cache-dtype fp8
-    --gpu-memory-utilization 0.4
+    --gpu-memory-utilization 0.6
     --max-model-len 262144
     --max-num-seqs 4
     --max-num-batched-tokens 8192
@@ -335,7 +335,7 @@ nemotron-embed-engine:
 
 ## Selecting the Right Model
 
-### Choose Qwen3.8-27B-NVFP4 (default) if:
+### Choose Qwen3.8-27B-NVFP4 (experimental) if:
 
 - You're doing **coding tasks** with Cline/Claude Code — this is the primary/default stack
 - You need **vision support** (screenshots, diagrams) alongside coding
@@ -343,7 +343,7 @@ nemotron-embed-engine:
 - You're comfortable with a model whose flags are still being empirically verified (see the compose
   file's PROVENANCE header) — first production use is the real test of `--tool-call-parser qwen3_xml`
 
-### Choose Qwen3.6-35B-A3B-NVFP4 (rollback) if:
+### Choose Qwen3.6-35B-A3B-NVFP4 (default) if:
 
 - Qwen3.8 regresses on something Qwen3.6 was known-good at (tool calling, latency, stability)
 - You need **large context** (up to 262K tokens) for long documents
@@ -375,7 +375,7 @@ nemotron-embed-engine:
 
 ## Testing Models
 
-### Test Qwen3.8-27B-NVFP4 (default)
+### Test Qwen3.8-27B-NVFP4 (experimental)
 
 ```bash
 # Switch to Qwen3.8
@@ -390,7 +390,7 @@ curl http://localhost:4000/v1/chat/completions \
   }'
 ```
 
-### Test Qwen3.6-35B-A3B-NVFP4 (rollback)
+### Test Qwen3.6-35B-A3B-NVFP4 (default)
 
 ```bash
 # Switch to Qwen3.6

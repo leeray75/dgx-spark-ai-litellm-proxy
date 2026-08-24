@@ -4,6 +4,37 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Qwen3.6 is the default/primary model again, Qwen3.8 is now experimental** (2026-08-24, reverting the
+  2026-08-23 attempt to make qwen3.8 the default). Driven by two findings: qwen3.8's throughput investigation
+  (below) found no working fix for its ~20 tok/s vs. qwen3.6's ~40-84 tok/s, and qwen3.8's `--tool-call-parser
+  qwen3_xml` remains unverified against a real Cline/Claude Code tool-calling session. Flipped default/rollback
+  labeling across `README.md`, `CLAUDE.md`, all of `docs/*.md`, `scripts/restart.sh` and `model-switch.sh`
+  (no-arg default now starts qwen3.6), and `litellm-config.yaml` (`default_fallbacks` back to
+  `qwen3.6-35b-a3b`, model_list reordered). `docker-compose.qwen3.8.yml` is unchanged and still fully
+  buildable — nothing about qwen3.8 was removed, only which one starts by default.
+  - Also fixed, while touching `scripts/model-switch.sh`: a second stale-label bug (independent of the earlier
+    stale-container-name bug fixed 2026-08-23) — several strings still said "Qwen3.6-27B-FP8" instead of
+    "Qwen3.6-35B-A3B-NVFP4", left over from before that model was renamed.
+
+- **`docker-compose.qwen3.6.yml`: `--gpu-memory-utilization` 0.4 → 0.6 (real incident, 2026-08-24).**
+  Root cause was *not* this file — it was collateral damage from the qwen3.8 throughput investigation below,
+  which ran `docker pull vllm/vllm-openai:nightly` to test a newer build. Since both `docker-compose.qwen3.6.yml`
+  and `docker-compose.qwen3.8.yml` reference the **mutable** `:nightly` tag rather than a pinned digest, that
+  pull silently upgraded qwen3.6's engine too on its next restart — to vLLM `0.26.1rc1.dev1102+ge9d1398d9`, a
+  build this file's `0.4` value was never validated against. Reproduced the exact same
+  `ValueError: No available memory for the cache blocks` crash qwen3.8 hit, for the identical reason (CUDA-graph
+  memory profiling leaving zero real KV cache headroom at the old value on the new build). Fixed the same way,
+  for parity: `0.6`, confirmed working with 24.54 GiB KV cache available at boot. Documented as corrections-
+  history item 18 in the compose file itself, and as a new troubleshooting entry (§4b) with the exact error
+  text. **Neither compose file is pinned to a digest yet** — that's the real fix still outstanding; both remain
+  vulnerable to this exact class of regression from any future `:nightly` pull for either stack.
+  - Real measured throughput post-fix: two independent wall-clock tests (700 tokens/8.4s and 1800 tokens/21.5s)
+    both landed at ~83.7-83.74 tok/s — reproducible, not noise, and higher than the ~40 tok/s originally
+    reported. The engine's own internal log-based average was noisier (35.6 tok/s median over 5 samples,
+    likely including a partial post-boot ramp-up window).
+
 ### Investigated (not fixed — no working fix currently exists)
 
 - **Qwen3.8 generation throughput ~20 tok/s vs. qwen3.6's ~40 tok/s.** Measured: median 19.5-20.1 tok/s over

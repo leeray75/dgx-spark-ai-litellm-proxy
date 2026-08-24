@@ -17,8 +17,8 @@ The initial model loading can take 10-60 minutes (first boot includes FlashInfer
 
 ```bash
 # Check container logs
-docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (default)
-docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (rollback)
+docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (default)
+docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (experimental)
 docker compose logs -f nemotron-embed-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine
@@ -59,7 +59,7 @@ docker compose logs litellm
 
 3. Verify the vLLM engine is healthy:
 ```bash
-curl http://localhost:8301/health  # Qwen3.8 (default) or Qwen3.6 (rollback) — whichever stack is running
+curl http://localhost:8301/health  # Qwen3.6 (default) or Qwen3.8 (experimental) — whichever stack is running
 curl http://localhost:8302/health  # For Embedding Engine (Qwen3.8/3.6 stacks)
 curl http://localhost:8300/health  # For Qwen3-Coder
 curl http://localhost:8200/health  # For Nemotron
@@ -172,6 +172,31 @@ encoder/multimodal path (qwen3.6's text-only checkpoint never had to account for
    --force-recreate qwen3-8-27b-nvfp4-engine`.
 3. The log line quoted above (right before the crash) tells you the exact breakeven value for your current
    config — treat that as a floor, not a target; leave real headroom above it for actual KV cache.
+
+---
+
+### 4b. Same OOM hits qwen3.6 after a `docker pull vllm/vllm-openai:nightly` (real incident, 2026-08-24)
+
+**Problem**: `docker-compose.qwen3.6.yml`'s engine, previously stable for weeks at `--gpu-memory-utilization 0.4`,
+suddenly hits the exact same `ValueError: No available memory for the cache blocks` crash described in 4a above.
+
+**Why this happened**: `docker-compose.qwen3.6.yml` and `docker-compose.qwen3.8.yml` both reference the
+**mutable** `:nightly` tag, not a pinned digest. A `docker pull vllm/vllm-openai:nightly` run to investigate
+qwen3.8's throughput (see CHANGELOG.md) silently upgraded qwen3.6's engine too, on its next restart, to a vLLM
+build it had never been validated against — reproducing the identical CUDA-graph-memory-profiling issue.
+
+**Solution**:
+
+1. This is already fixed in the current `docker-compose.qwen3.6.yml` (`--gpu-memory-utilization 0.6`, confirmed
+   working with 24.54 GiB KV cache available). If you see this error, check you're on the current file version.
+2. Check which build you're actually running before assuming the file is wrong:
+   ```bash
+   docker exec qwen3-6-35b-nvfp4-engine python3 -c "import vllm; print(vllm.__version__)"
+   ```
+3. **Before running `docker pull vllm/vllm-openai:nightly` for any reason** (including investigating a different
+   compose file entirely), know that it affects both `docker-compose.qwen3.6.yml` and
+   `docker-compose.qwen3.8.yml` simultaneously, since neither is pinned to a digest yet. Re-test both stacks after
+   any such pull, not just the one you were originally investigating.
 
 ---
 
@@ -343,8 +368,8 @@ grep LANGFUSE_SECRET_KEY .env
 docker compose logs -f
 
 # Specific service
-docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (default)
-docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (rollback)
+docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (default)
+docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (experimental)
 docker compose logs -f nemotron-embed-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine

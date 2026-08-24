@@ -4,9 +4,9 @@
 # For NVIDIA DGX Spark (Blackwell GB10) workstation
 #
 # Usage:
-#   ./restart.sh                    # Restart Qwen3.8-27B-NVFP4 (default)
-#   ./restart.sh qwen3.8            # Restart Qwen3.8-27B-NVFP4
-#   ./restart.sh qwen3.6            # Restart Qwen3.6-35B-A3B-NVFP4 (rollback)
+#   ./restart.sh                    # Restart Qwen3.6-35B-A3B-NVFP4 (default)
+#   ./restart.sh qwen3.6            # Restart Qwen3.6-35B-A3B-NVFP4
+#   ./restart.sh qwen3.8            # Restart Qwen3.8-27B-NVFP4 (experimental — see CHANGELOG.md)
 #   ./restart.sh qwen               # Restart Qwen3-Coder-Next-FP8
 #   ./restart.sh nemotron           # Restart Nemotron-3-Super-120B
 #   ./restart.sh clean              # Stop and clear caches
@@ -63,7 +63,7 @@ start_qwen38() {
     docker compose -f "$COMPOSE_QWEN38" up -d
 }
 
-# Start Qwen3.6-35B-A3B-NVFP4 (rollback)
+# Start Qwen3.6-35B-A3B-NVFP4
 start_qwen36() {
     log_info "Starting Qwen3.6-35B-A3B-NVFP4 stack..."
     docker compose -f "$COMPOSE_QWEN36" up -d
@@ -120,7 +120,7 @@ wait_for_container() {
 
 # Full restart with cache clearing
 restart_stack() {
-    local model=${1:-qwen3.8}
+    local model=${1:-qwen3.6}
 
     echo ""
     log_info "🚀 Starting Full Stack Restart..."
@@ -226,15 +226,15 @@ show_help() {
     echo "  $0 --help        — Show this help message"
     echo ""
     echo "Models:"
-    echo "  qwen3.8   — Qwen3.8-27B-NVFP4 (default, 27B dense, vision-enabled)"
-    echo "  qwen3.6   — Qwen3.6-35B-A3B-NVFP4 (rollback, 35B MoE 3B activated, text-only)"
+    echo "  qwen3.6   — Qwen3.6-35B-A3B-NVFP4 (default, 35B MoE 3B activated, text-only, ~84 tok/s)"
+    echo "  qwen3.8   — Qwen3.8-27B-NVFP4 (experimental, 27B dense, vision-enabled, ~20 tok/s — see CHANGELOG.md)"
     echo "  qwen      — Qwen3-Coder-Next-FP8 (80B total, FP8 quant)"
     echo "  nemotron  — Nemotron-3-Super-120B-A12B-NVFP4 (NVFP4 quant)"
     echo ""
     echo "Examples:"
-    echo "  $0              # Restart Qwen3.8-27B-NVFP4 (default)"
-    echo "  $0 qwen3.8      # Restart Qwen3.8-27B-NVFP4"
-    echo "  $0 qwen3.6      # Restart Qwen3.6-35B-A3B-NVFP4 (rollback)"
+    echo "  $0              # Restart Qwen3.6-35B-A3B-NVFP4 (default)"
+    echo "  $0 qwen3.6      # Restart Qwen3.6-35B-A3B-NVFP4"
+    echo "  $0 qwen3.8      # Restart Qwen3.8-27B-NVFP4 (experimental)"
     echo "  $0 qwen         # Restart Qwen3-Coder-Next-FP8"
     echo "  $0 nemotron     # Restart Nemotron-3-Super-120B"
     echo "  $0 status       # Check container status"
@@ -243,7 +243,7 @@ show_help() {
 
 # Main
 main() {
-    case "${1:-qwen3.8}" in
+    case "${1:-qwen3.6}" in
         qwen3.8|Qwen3.8|QWEN3.8)
             restart_stack "qwen3.8"
             ;;

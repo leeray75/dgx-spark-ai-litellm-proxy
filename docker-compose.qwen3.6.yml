@@ -310,6 +310,31 @@
 #      general-purpose Qwen3.6-35B-A3B checkpoint isn't) was judged more
 #      convincing than whatever prompted item 16, so this is the setting to
 #      leave alone going forward absent a concrete failure with qwen3_xml.
+#  18. --gpu-memory-utilization 0.4 → 0.6 (2026-08-24). Root cause was NOT
+#      this file — it was collateral damage from an unrelated investigation
+#      (docker-compose.qwen3.8.yml's throughput debugging) that ran
+#      `docker pull vllm/vllm-openai:nightly` to test a newer build. Since
+#      this file references the MUTABLE `:nightly` tag rather than a pinned
+#      digest (see the "Image:" note below — its own "Pinned working
+#      digest: <record here once confirmed>" placeholder was in fact never
+#      filled in), that pull silently upgraded THIS engine too, on the next
+#      restart, to vLLM 0.26.1rc1.dev1102+ge9d1398d9 — a build this file's
+#      0.4 value was never validated against. Confirmed via log: "The
+#      current --gpu-memory-utilization=0.4000 is equivalent to
+#      --gpu-memory-utilization=0.3828 without CUDA graph memory profiling.
+#      To maintain the same effective KV cache size as before, increase
+#      --gpu-memory-utilization to 0.4172" — followed by the exact same
+#      "No available memory for the cache blocks" crash qwen3.8 hit at 0.4
+#      on this same new build. This is the identical root cause as
+#      qwen3.8's own gpu-memory-utilization correction, just triggered here
+#      by an incidental image-tag collision rather than a first boot.
+#      0.6 chosen for parity with qwen3.8's fix and to leave real headroom
+#      (not just breakeven) above the ~0.42 minimum the log suggested —
+#      not yet re-measured for actual KV cache size/swap at this value on
+#      the new build. TAKEAWAY for future work on ANY file in this repo:
+#      pulling `:nightly` for one model's investigation can silently affect
+#      every other file that also references `:nightly` unpinned — pin to
+#      a digest (or a stable local tag) before pulling fresh in the future.
 #
 # External ports (reachable from other machines):
 #   3000  — Langfuse UI + API
@@ -719,7 +744,7 @@ services:
       --quantization modelopt
       --kv-cache-dtype fp8
       --tensor-parallel-size 1
-      --gpu-memory-utilization 0.4
+      --gpu-memory-utilization 0.6
       --max-model-len 262144
       --max-num-seqs 4
       --enable-chunked-prefill

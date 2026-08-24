@@ -95,16 +95,16 @@ openssl rand -hex 32  # For LITELLM_SALT_KEY
 
 ### 5. Start the Stack
 
-#### Start with Qwen3.8-27B-NVFP4 (default):
-
-```bash
-docker compose -f docker-compose.qwen3.8.yml up -d
-```
-
-#### Or start with Qwen3.6-35B-A3B-NVFP4 (rollback):
+#### Start with Qwen3.6-35B-A3B-NVFP4 (default):
 
 ```bash
 docker compose -f docker-compose.qwen3.6.yml up -d
+```
+
+#### Or start with Qwen3.8-27B-NVFP4 (experimental):
+
+```bash
+docker compose -f docker-compose.qwen3.8.yml up -d
 ```
 
 #### Or start with Qwen3-Coder-Next-FP8:
@@ -129,8 +129,8 @@ docker compose ps
 docker compose logs -f
 
 # Check specific service logs
-docker compose logs -f qwen3-8-27b-nvfp4-engine    # For Qwen3.8 (default)
-docker compose logs -f qwen3-6-35b-nvfp4-engine    # For Qwen3.6 (rollback)
+docker compose logs -f qwen3-6-35b-nvfp4-engine    # For Qwen3.6 (default)
+docker compose logs -f qwen3-8-27b-nvfp4-engine    # For Qwen3.8 (experimental)
 docker compose logs -f nemotron-embed-engine       # For Embedding (Qwen3.8/3.6 stacks)
 docker compose logs -f qwen3-coder-next-engine     # For Qwen3-Coder
 docker compose logs -f nemotron-engine             # For Nemotron
@@ -146,7 +146,7 @@ docker compose logs -f nemotron-engine             # For Nemotron
 
 ```bash
 # Check vLLM health
-curl http://localhost:8301/health  # Qwen3.8 (default) or Qwen3.6 (rollback) — whichever stack is running
+curl http://localhost:8301/health  # Qwen3.6 (default) or Qwen3.8 (experimental) — whichever stack is running
 curl http://localhost:8302/health  # For Embedding Engine (Qwen3.8/3.6 stacks)
 curl http://localhost:8300/health  # For Qwen3-Coder
 curl http://localhost:8200/health  # For Nemotron
@@ -168,22 +168,22 @@ curl http://localhost:8200/health  # For Nemotron
 # Set your master key
 export LITELLM_MASTER_KEY=sk-your-master-key
 
-# Test Qwen3.8-27B-NVFP4 (default)
-curl http://localhost:4000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -d '{
-    "model": "qwen3.8-27b",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "temperature": 0.7
-  }'
-
-# Test Qwen3.6-35B-A3B-NVFP4 (rollback)
+# Test Qwen3.6-35B-A3B-NVFP4 (default)
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -d '{
     "model": "qwen3.6-35b-a3b",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "temperature": 0.7
+  }'
+
+# Test Qwen3.8-27B-NVFP4 (experimental)
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -d '{
+    "model": "qwen3.8-27b",
     "messages": [{"role": "user", "content": "Hello!"}],
     "temperature": 0.7
   }'
@@ -223,11 +223,11 @@ curl http://localhost:4000/v1/embeddings \
 To switch between models after installation:
 
 ```bash
-# Switch to Qwen3.8-27B-NVFP4 (default)
-./scripts/model-switch.sh qwen3.8
-
-# Switch to Qwen3.6-35B-A3B-NVFP4 (rollback)
+# Switch to Qwen3.6-35B-A3B-NVFP4 (default)
 ./scripts/model-switch.sh qwen3.6
+
+# Switch to Qwen3.8-27B-NVFP4 (experimental)
+./scripts/model-switch.sh qwen3.8
 
 # Switch to Qwen3-Coder-Next-FP8
 ./scripts/model-switch.sh qwen
