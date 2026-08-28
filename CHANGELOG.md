@@ -6,6 +6,35 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`litellm-callbacks/anthropic_input_text_fix.py`: found and fixed the actual root cause of the skills-listing
+  gap — `role: "system"` messages injected mid-conversation were silently dropped whole** (2026-08-28). The two
+  fixes above narrowed the problem but didn't close it: real-world retesting from the Windows Claude Code client
+  still showed only 1 of 10 skills after both were live. Captured the actual raw request Claude Code sends
+  (temporary `async_pre_call_hook` logging on the proxy, removed after use) and found the full 10-skill listing
+  present verbatim — not in the top-level `system` field, but in `messages[1]`, a discrete message with
+  `"role": "system"` injected mid-conversation (Claude Code's own convention, alongside similar messages for the
+  available-agent-types listing and a token-budget reminder — likely kept out of the main cached system block so
+  that block stays stable across turns for prompt-caching purposes). Anthropic's real Messages API only defines
+  `"user"`/`"assistant"` roles for the `messages` array; `translate_anthropic_messages_to_openai()` in
+  `litellm/llms/anthropic/experimental_pass_through/adapters/transformation.py` has no branch for any other role,
+  so the entire message — all 10 skill descriptions, verbatim — was silently discarded before ever reaching the
+  backend model, no error, no log. This is why the earlier synthetic reproductions (block-type substitution in
+  `system`) never caught it: the real bug isn't in content-block typing at all, it's an entire message shape
+  litellm's translator was never written to expect.
+  - **Fix**: extended the existing `async_pre_call_hook` callback to fold any `role: "system"` messages into the
+    top-level `system` field (as `"text"` blocks, preserving order) before litellm's translator runs, removing
+    them from `messages` so the remaining user/assistant turn alternation stays valid.
+  - **Verified two ways**: (1) replayed the exact captured real request (5 messages, including both `role:
+    "system"` messages) directly against the fixed proxy — the streamed response correctly listed all 10 skills,
+    verbatim, unprompted; (2) independently, the user re-ran the same "list your skills" query from the real
+    Windows Claude Code client under the `local` profile and got the identical, correct 10-skill table, now
+    matching the `vllm` (direct) profile's output exactly.
+  - This fully explains the original investigation's symptom (Claude Code enumerating a skill/tool listing
+    correctly via direct vLLM but not via LiteLLM) — the `container`/skills field on `anthropic_messages_handler()`
+    was checked and ruled out (it's read into a local variable and never used anywhere downstream in either
+    routing path, but this is Anthropic's separate server-side code-execution Skills API, not how Claude Code CLI
+    delivers its local skill manifest — confirmed by capturing the real request, which never populated it).
+
 - **New `litellm-callbacks/anthropic_input_text_fix.py`: fixed `/v1/messages` silently dropping non-`"text"`
   content blocks (`"input_text"`/`"output_text"`) from the system prompt and message history** (2026-08-28),
   found via real-world reproduction on a second machine: a Claude Code v2.1.241 session on Windows, talking to
