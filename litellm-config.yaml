@@ -10,20 +10,27 @@
 #
 # qwen3.6-35b-a3b is the PRIMARY/DEFAULT entry (docker-compose.qwen3.6.yml,
 # port 8301, --served-model-name qwen3.6-35b-a3b → openai/qwen3.6-35b-a3b).
+# --tool-call-parser qwen3_coder — verified against a real 5-tool tool-calling
+# test 2026-08-27 (docker-compose.qwen3.6.yml corrections item 19).
+#
 # qwen3.8-27b is KEPT (not deleted), reachable if docker-compose.qwen3.8.yml
-# is brought up instead — but it's EXPERIMENTAL, not the default, as of
-# 2026-08-24: measured throughput ~20 tok/s vs qwen3.6's ~40-84 tok/s with no
-# working fix found (two kernel-backend levers tried, both failed — see
-# CHANGELOG.md), and its --tool-call-parser qwen3_xml is still unverified
-# against a real tool-calling session. See docker-compose.qwen3.8.yml's
-# PROVENANCE and CORRECTIONS HISTORY headers for the full investigation.
+# is brought up instead — but it's EXPERIMENTAL, not the default. Checkpoint
+# is Inferact/Qwen3.8-27B-NVFP4 as of 2026-08-26 (swapped from Unsloth's);
+# measured throughput ~17.5-18.5 tok/s vs qwen3.6's ~83 tok/s with no working
+# fix found across two checkpoints and two kernel-backend attempts (see
+# CHANGELOG.md). Also uses --tool-call-parser qwen3_coder, but UNVERIFIED for
+# this specific checkpoint (qwen3.6's verification doesn't transfer). See
+# docker-compose.qwen3.8.yml's PROVENANCE/RESULT headers for the full
+# investigation.
 #
 # Model: nvidia/Qwen3.6-35B-A3B-NVFP4
 #   35B MoE (3B activated), NVFP4 quantized (NVIDIA ModelOpt)
 #   Engine port: 8301
 #   Vision support: no (text-only MoE checkpoint)
 #   Reasoning parser: qwen3 (required to prevent thinking tokens in output)
-#   Tool-call parser: qwen3_xml (official NVIDIA spec for this checkpoint)
+#   Tool-call parser: qwen3_coder (per the official vLLM recipe for this
+#     checkpoint/hardware; verified against a real 5-tool tool-calling test
+#     2026-08-27 — see docker-compose.qwen3.6.yml corrections item 19)
 #   max-model-len: 262144 (vLLM --max-model-len; full context window)
 # =============================================================================
 
@@ -55,7 +62,7 @@ model_list:
       input_cost_per_token: 0.000000015
       output_cost_per_token: 0.000000035
 
-  # ── Experimental alias: unsloth/Qwen3.8-27B-NVFP4 ───────────────────────────
+  # ── Experimental alias: Inferact/Qwen3.8-27B-NVFP4 ──────────────────────────
   # Only reachable if docker-compose.qwen3.8.yml is brought up instead of
   # docker-compose.qwen3.6.yml. Not the default — see file header for why.
   - model_name: qwen3.8-27b
@@ -104,6 +111,16 @@ litellm_settings:
   drop_params: true
   drop_unsupported_params: true
   modify_params: true
+  # Route /v1/messages for openai/-prefixed models (our vLLM backends) through
+  # chat/completions instead of LiteLLM's default OpenAI Responses API bridge.
+  # vLLM's native /v1/responses leaves reasoning items' `summary` field empty
+  # (only OpenAI populates that via its proprietary summarizer), and LiteLLM's
+  # Responses->Anthropic translator only reads `summary` — never the raw
+  # `content` field vLLM actually puts reasoning text in — so thinking blocks
+  # were silently dropped on every request. The chat/completions adapter
+  # correctly falls back to `reasoning_content` for the `thinking` block.
+  # See: https://github.com/BerriAI/litellm/issues/29518
+  use_chat_completions_url_for_anthropic_messages: true
   request_timeout: 600
   stream_timeout: 300
   num_retries: 3

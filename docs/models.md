@@ -4,19 +4,19 @@ This guide compares the supported LLMs for the **NVIDIA DGX Spark (Blackwell GB1
 
 ## Model Overview
 
-### Qwen3.8-27B-NVFP4 (EXPERIMENTAL — see throughput note in Model Comparison below)
+### Qwen3.8-27B-NVFP4 (EXPERIMENTAL — NOT recommended, see throughput note below)
 
 | Attribute | Value |
 |-----------|-------|
 | **Model Name** | Qwen3.8-27B-NVFP4 |
-| **Provider** | Unsloth |
+| **Provider** | Inferact (swapped from Unsloth 2026-08-26 — see CHANGELOG.md) |
 | **Total Parameters** | 27B (dense — not MoE) |
 | **Active Parameters** | 27B (all) |
 | **Architecture** | Hybrid Gated-DeltaNet + Gated-Attention, with vision encoder |
-| **Quantization** | compressed-tensors NVFP4 + FP8 (mixed) |
-| **Context Window** | 262K tokens native (extensible to 1M via YaRN, untested here) |
-| **VRAM Required** | ~22.13 GiB weights (confirmed via boot log) |
-| **Model ID** | `unsloth/Qwen3.8-27B-NVFP4` |
+| **Quantization** | NVIDIA ModelOpt NVFP4 (W4A4, group size 16); `lm_head` NOT quantized |
+| **Context Window** | 262K tokens native |
+| **VRAM Required** | ~24.97 GiB weights (confirmed via boot log) |
+| **Model ID** | `Inferact/Qwen3.8-27B-NVFP4` |
 | **vLLM Image** | `vllm/vllm-openai:nightly` |
 | **Port** | 8301 |
 
@@ -24,26 +24,27 @@ This guide compares the supported LLMs for the **NVIDIA DGX Spark (Blackwell GB1
 
 - **Vision-capable**: has a vision encoder, unlike qwen3.6's text-only checkpoint
 - **Dense architecture**: no MoE routing — simpler kernel selection, no `moe_backend` config needed
-- **Native kernels confirmed**: `FlashInferCutlassNvFp4LinearKernel` (NVFP4 GEMM) and
-  `CutlassFP8ScaledMMLinearKernel` (FP8 layers), no Marlin fallback needed on GB10/SM121 for this
-  quantization scheme (unlike qwen3.6's ModelOpt scheme, which does need Marlin)
+- **Same ModelOpt quantization scheme as qwen3.6**, but vLLM auto-selects the NATIVE
+  `FlashInferCutlassNvFp4LinearKernel` for this checkpoint rather than Marlin (unlike qwen3.6, which uses
+  Marlin for the same quant_method on the same hardware — the discrepancy is unconfirmed)
 - **Native Reasoning**: `--reasoning-parser qwen3`
-- **Tool Calling**: `--tool-call-parser qwen3_xml` — **carried over by analogy from qwen3.6, not
-  independently verified for this model**; see `docker-compose.qwen3.8.yml`'s PROVENANCE header
-- **Speculative Decoding**: MTP support, `num_speculative_tokens=2` (matches Unsloth's own documented example)
+- **Tool Calling**: `--tool-call-parser qwen3_coder` — the vLLM recipe's recommendation for this checkpoint,
+  **not independently verified** against a real Cline/Claude Code tool-calling session
+- **Speculative Decoding**: MTP support, `num_speculative_tokens=3` (matches the vLLM recipe's recommendation)
+
+#### Throughput — NOT RECOMMENDED
+
+Real measured throughput: **~17.5 tok/s** (700 tokens in 39.95s), with 96% GPU utilization but only ~34W power
+draw — the same low-power-despite-busy signature the previously-tried Unsloth checkpoint showed at ~20 tok/s.
+Both Qwen3.8 checkpoints tried so far land in the same slow class; **qwen3.6 (~83.7 tok/s) is the only proven-fast
+option and remains the default.** Full investigation (including the retired Unsloth checkpoint's own crash
+history) is in `docker-compose.qwen3.8.yml`'s header.
 
 #### Use Cases
 
-- AI coding agent (Cline, Claude Code) — primary/default model for this stack
-- Vision-assisted coding tasks (screenshots, diagrams)
-- Technical documentation
-- General-purpose assistant with coding focus
-
-#### Known-unverified items
-
-See `docker-compose.qwen3.8.yml`'s PROVENANCE and CORRECTIONS HISTORY headers for the full list of what's
-confirmed vs. assumed. `--gpu-memory-utilization` was corrected from an initial `0.4` (which OOM'd on first
-boot) to `0.6` — verified working but not yet a measured optimum.
+- Not currently recommended for real work — kept as an experimental option pending a vLLM build with better
+  SM121 kernel support for NVFP4 on this architecture family
+- Vision-assisted coding tasks, if/when the throughput issue is resolved
 
 ---
 
@@ -69,7 +70,8 @@ boot) to `0.6` — verified working but not yet a measured optimum.
 - **MoE Architecture**: 35B total, 3B activated per token — efficient inference
 - **Text-Only**: No vision encoder; all memory available for KV cache
 - **Native Reasoning**: `--reasoning-parser qwen3` prevents thinking tokens in output
-- **Native Tool Calling**: `--tool-call-parser qwen3_xml` (official NVIDIA spec)
+- **Native Tool Calling**: `--tool-call-parser qwen3_coder` (per the official vLLM recipe; verified against a
+  real 5-tool tool-calling test 2026-08-27)
 - **Speculative Decoding**: MTP (Multi-step Predictive Training) support
 
 #### Use Cases
@@ -191,7 +193,7 @@ boot) to `0.6` — verified working but not yet a measured optimum.
 | **Quantization** | NVFP4+FP8 (compressed-tensors) | NVFP4 (ModelOpt) | FP8 | NVFP4 | NVFP4 |
 | **Output Format** | Standard JSON | Standard JSON | Standard JSON | Reasoning blocks | 2048-dim vector |
 | **Vision** | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No |
-| **Tool Calling** | Native (qwen3_xml, unverified) | Native (qwen3_xml) | Native (qwen3_coder) | Requires parser | N/A |
+| **Tool Calling** | Native (qwen3_coder, unverified) | Native (qwen3_coder, verified) | Native (qwen3_coder) | Requires parser | N/A |
 | **Best For** | Coding (rollback) | Coding (Cline/Claude Code), default | Coding tasks | General reasoning | Embeddings/RAG |
 | **Runs Concurrently** | ❌ | ❌ | ❌ | ❌ | ✅ Yes |
 
@@ -213,9 +215,10 @@ qwen3-8-27b-nvfp4-engine:
   volumes:
     - vllm-qwen38-triton-cache:/root/.triton/cache
   command:
-    --model unsloth/Qwen3.8-27B-NVFP4
+    --model Inferact/Qwen3.8-27B-NVFP4
     --served-model-name qwen3.8-27b
     --dtype auto
+    --quantization modelopt
     --kv-cache-dtype fp8
     --gpu-memory-utilization 0.6
     --max-model-len 262144
@@ -224,16 +227,15 @@ qwen3-8-27b-nvfp4-engine:
     --load-format fastsafetensors
     --mamba-ssm-cache-dtype float32
     --attention-backend flashinfer
-    --tool-call-parser qwen3_xml
+    --tool-call-parser qwen3_coder
     --reasoning-parser qwen3
-    --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN38_NUM_SPECULATIVE_TOKENS:-2}}'
+    --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN38_NUM_SPECULATIVE_TOKENS:-3}}'
 ```
 
-No `--quantization` flag — compressed-tensors NVFP4/FP8 is auto-detected from the checkpoint. No `--moe-backend` or
-MoE-specific env vars either — this is a dense model, unlike every other engine in this table. See
-`docker-compose.qwen3.8.yml`'s PROVENANCE and CORRECTIONS HISTORY headers for what's verified vs. carried over by
-analogy from qwen3.6 (`--tool-call-parser qwen3_xml` in particular is unverified for this model), and for the
-`--gpu-memory-utilization 0.4 → 0.6` real-boot OOM correction.
+Explicit `--quantization modelopt` — same scheme qwen3.6 uses. No `--moe-backend` or MoE-specific env vars —
+this is a dense model, unlike every other engine in this table. **Real measured throughput ~17.5 tok/s**, same
+slow class as the previously-tried Unsloth checkpoint — see `docker-compose.qwen3.8.yml`'s PROVENANCE, RESULT,
+and ARCHIVED sections for the full investigation of both checkpoints tried so far. Not recommended for real use.
 
 ### Qwen3.6-35B-A3B-NVFP4 (docker-compose.qwen3.6.yml, default)
 
@@ -257,22 +259,26 @@ qwen3-6-35b-nvfp4-engine:
     --dtype auto
     --quantization modelopt
     --kv-cache-dtype fp8
-    --gpu-memory-utilization 0.6
+    --gpu-memory-utilization 0.5
     --max-model-len 262144
-    --max-num-seqs 4
+    --max-num-seqs 8
     --max-num-batched-tokens 8192
     --load-format fastsafetensors
     --moe-backend marlin
     --max-cudagraph-capture-size 256
-    --compilation-config '{"cudagraph_capture_sizes":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,24,32,48,64,96,128,192,256]}'
-    --tool-call-parser qwen3_xml
+    --compilation-config '{"cudagraph_capture_sizes":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,48,64,96,128,192,256]}'
+    --tool-call-parser qwen3_coder
     --reasoning-parser qwen3
     --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN36_NUM_SPECULATIVE_TOKENS:-3},"moe_backend":"triton"}'
 ```
 
-`--compilation-config`'s `cudagraph_capture_sizes` is densified across 1-16 because that's the effective decode-batch
-range for this engine: `--max-num-seqs 4` combined with MTP's per-sequence verification query length of
-`1 + num_speculative_tokens` (up to 4 at the default of 3) tops out at `4 × 4 = 16`. `QWEN36_NUM_SPECULATIVE_TOKENS`
+`--gpu-memory-utilization 0.5`, `--max-num-seqs 8`, and `--tool-call-parser qwen3_coder` were aligned to the
+official vLLM recipe on 2026-08-27 (previously `0.6`/`4`/`qwen3_xml`) — see `docker-compose.qwen3.6.yml`
+corrections items 19-20 for the full diff and verification (including a real 5-tool tool-calling test).
+
+`--compilation-config`'s `cudagraph_capture_sizes` is densified across 1-32 because that's the effective decode-batch
+range for this engine: `--max-num-seqs 8` combined with MTP's per-sequence verification query length of
+`1 + num_speculative_tokens` (up to 4 at the default of 3) tops out at `8 × 4 = 32`. `QWEN36_NUM_SPECULATIVE_TOKENS`
 (from `.env`, default `3`) is the A/B toggle for the speculative lookahead depth — see `CHANGELOG.md` for the
 acceptance-rate reasoning and benchmarking steps.
 
@@ -335,21 +341,20 @@ nemotron-embed-engine:
 
 ## Selecting the Right Model
 
-### Choose Qwen3.8-27B-NVFP4 (experimental) if:
+### Choose Qwen3.8-27B-NVFP4 (experimental — not currently recommended) if:
 
-- You're doing **coding tasks** with Cline/Claude Code — this is the primary/default stack
-- You need **vision support** (screenshots, diagrams) alongside coding
-- You need **large context** (262K tokens) for long documents
-- You're comfortable with a model whose flags are still being empirically verified (see the compose
-  file's PROVENANCE header) — first production use is the real test of `--tool-call-parser qwen3_xml`
+- You specifically need **vision support** (screenshots, diagrams) and can accept ~17-20 tok/s
+- You want to help further investigate the throughput gap (see CHANGELOG.md — dense-vs-MoE architecture is the
+  current leading theory, not fixable by kernel/config changes; two checkpoints and two kernel backends tried)
 
 ### Choose Qwen3.6-35B-A3B-NVFP4 (default) if:
 
-- Qwen3.8 regresses on something Qwen3.6 was known-good at (tool calling, latency, stability)
+- You're doing **coding tasks** with Cline/Claude Code — this is the primary/default stack, ~83 tok/s
 - You need **large context** (up to 262K tokens) for long documents
-- You need **native tool calling** with a confirmed-working qwen3_xml parser
+- You need **native tool calling** — `qwen3_coder` parser, verified against a real 5-tool tool-calling test
+  (2026-08-27, see `docker-compose.qwen3.6.yml` corrections item 19)
 - You want **fast restarts** with FlashInfer cache persistence (already warmed from prior use)
-- You need **efficient memory usage** (only ~26GB weights)
+- You need **efficient memory usage** (only ~22GB weights)
 
 ### Choose Qwen3-Coder-Next-FP8 if:
 

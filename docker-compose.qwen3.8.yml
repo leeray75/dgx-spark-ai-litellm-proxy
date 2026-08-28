@@ -1,11 +1,10 @@
 # =============================================================================
-# docker-compose.qwen3.8.yml — Qwen3.8-27B-NVFP4 (Unsloth) on NVIDIA DGX Spark (GB10)
+# docker-compose.qwen3.8.yml — Qwen3.8-27B-NVFP4 (Inferact, ModelOpt) on NVIDIA DGX Spark (GB10)
 #
 # Main stack configuration. Includes full Langfuse/LiteLLM observability stack.
-# Replaces docker-compose.qwen3.6.yml as the primary/default chat stack.
-# docker-compose.qwen3.6.yml is left in place (not deleted) for rollback —
-# same policy this project already uses for abandoned configs (see the
-# .unsloth-nvfp4-fast.bak sibling file next to that one).
+# EXPERIMENTAL — docker-compose.qwen3.6.yml is the default/primary stack as of
+# 2026-08-24 (see CHANGELOG.md). This file is kept fully buildable as the
+# next-to-revisit option.
 #
 # Usage:
 #   docker compose -f docker-compose.qwen3.8.yml up -d
@@ -16,7 +15,204 @@
 # use case.
 #
 # =============================================================================
-# PROVENANCE — what's verified vs. assumed in this file (read before tuning)
+# CHECKPOINT SWAP (2026-08-24): unsloth/Qwen3.8-27B-NVFP4 → Inferact/Qwen3.8-27B-NVFP4
+# =============================================================================
+# The Unsloth checkpoint (compressed-tensors NVFP4+FP8) is RETIRED from this
+# file as of this swap — its full PROVENANCE/CORRECTIONS HISTORY is preserved
+# below under "ARCHIVED", not deleted, per this project's standing policy of
+# keeping abandoned configs as reference (see also the .unsloth-nvfp4-fast.bak
+# sibling next to docker-compose.qwen3.6.yml).
+#
+# WHY: the Unsloth checkpoint's throughput investigation (CHANGELOG.md,
+# 2026-08-23/24) found no working fix for its ~20 tok/s (vs qwen3.6's ~40-84
+# tok/s) — 96% GPU utilization at only ~34W power draw, consistent with
+# immature SM121 kernel support for its compressed-tensors NVFP4+FP8 scheme.
+# Forcing Marlin (the fix that works for qwen3.6's NVFP4) crashed instead:
+# `AttributeError: 'ParallelLMHead' object has no attribute
+# 'output_size_per_partition'` — because Unsloth's checkpoint has an
+# FP8-quantized lm_head, and vLLM's Marlin FP8 weight-prep path doesn't
+# handle that layer type.
+#
+# The Inferact checkpoint was suggested by the user with a pasted analysis
+# (citing recipes.vllm.ai) claiming better MTP acceptance (0.897 vs 0.788)
+# and 545K+ HF downloads. That pasted analysis had real red flags — malformed
+# citation markup consistent with an unverified secondary AI summary, and
+# specific numbers that don't fully agree with what this session's own direct
+# fetches found (a WebFetch summary of the HF page said "8-bit precision,
+# BF16/U8"; the recipe page summary said "uniform W4A4"; raw config.json —
+# see below — settled it: it's genuinely NVFP4, W4A4-style, group size 16).
+# The benchmark numbers (KV tokens, weights/GPU, MTP acceptance) come from
+# the recipe's own 2x RTX 5090 benchmark table, NOT verified on GB10 — treat
+# them as directional, not as confirmed facts for this hardware.
+#
+# What WAS verified directly this session (raw config.json fetch, same method
+# used for the Unsloth checkpoint originally):
+#   - architectures: ["Qwen3_5ForConditionalGeneration"], model_type: "qwen3_5"
+#     — SAME architecture class as both the Unsloth checkpoint and qwen3.6.
+#   - quantization_config: quant_method "modelopt", quant_algo "NVFP4",
+#     producer "modelopt" v0.0.1.dev1+ga21173a4d, group size 16 for both
+#     weights and input activations (genuinely W4A4, not the vague "8-bit"
+#     a WebFetch summary claimed).
+#   - ignored_layers includes "lm_head", embedding tokens, "model.visual*",
+#     and "mtp*" — i.e. lm_head is NOT quantized. This directly sidesteps the
+#     exact bug that crashed the Unsloth checkpoint when Marlin was forced.
+#   - max_position_embeddings: 262144. Same 27B dense, vision-capable, hybrid
+#     Gated-DeltaNet + Gated-Attention architecture as the Unsloth checkpoint.
+#
+# THE KEY REASON THIS IS WORTH TRYING: quant_method "modelopt" is NVIDIA's
+# own quantization library — the SAME scheme qwen3.6 uses successfully via
+# the Marlin kernel fallback on SM121 (see qwen3.6's own corrections history,
+# archived PROVENANCE below, and CLAUDE.md's "IMPORTANT — FP4 compute on
+# GB10" note). This is a real, evidence-based reason to expect this
+# checkpoint's kernel path to behave like qwen3.6's proven-fast one, not
+# marketing.
+#
+# RESULT (tested 2026-08-26, real boot on this hardware): the reasoning above
+# did NOT pan out. Boot was clean — architecture, MTP drafter, and KV cache
+# allocation (24.74 GiB available at --gpu-memory-utilization 0.6, weights
+# 24.97 GiB) all resolved without error, and VLLM_NVFP4_GEMM_BACKEND=marlin
+# had no effect either way: vLLM auto-selected the NATIVE
+# FlashInferCutlassNvFp4LinearKernel for NVFP4 GEMM, same as the retired
+# Unsloth checkpoint, NOT Marlin (unlike qwen3.6, which does use Marlin for
+# its ModelOpt scheme on this same hardware/vLLM build — same quant_method,
+# different kernel outcome, reason unconfirmed). Real generation throughput:
+# 700 tokens in 39.95s = 17.52 tok/s, with 96% GPU utilization but only ~34W
+# power draw — the SAME low-power-despite-busy signature the retired Unsloth
+# checkpoint showed at ~20 tok/s. The recipe's benchmark claims (0.897 MTP
+# acceptance, etc., measured on 2x RTX 5090) do NOT translate to this
+# DGX Spark + vLLM nightly combination. This checkpoint does not solve the
+# throughput problem either — it performs in the same class as the retired
+# Unsloth checkpoint (worse, on this one test).
+#
+# FOLLOW-UP TEST (also 2026-08-26): added --linear-backend marlin to the
+# command below to test whether forcing the SAME kernel qwen3.6 uses
+# successfully would close the gap. This time it worked at the kernel-
+# selection level — log confirmed "Using MarlinNvFp4LinearKernel for NVFP4
+# GEMM" (unlike the VLLM_NVFP4_GEMM_BACKEND=marlin env var above, which was a
+# no-op both times it was tried on a Qwen3.8 checkpoint). Clean boot, no
+# crash (unlike forcing Marlin on the Unsloth checkpoint, consistent with
+# this checkpoint's unquantized lm_head), even MORE KV cache headroom than
+# the native-kernel run (29.32 GiB vs 24.74 GiB). Real generation throughput
+# with Marlin: 700 tokens in 37.74s = 18.55 tok/s — only ~6% higher than the
+# native-kernel run (17.52 tok/s), within noise, still nowhere near qwen3.6's
+# 83.25 tok/s on the identical prompt. Same ~96%/34-35W signature persisted
+# even with Marlin active.
+#
+# REVISED CONCLUSION: kernel choice (native Cutlass vs Marlin) is NOT the
+# primary bottleneck for this checkpoint — ruled out empirically, not just
+# theoretically, since forcing the exact kernel that makes qwen3.6 fast
+# barely moved the number. The dominant factor is much more likely
+# ARCHITECTURAL: qwen3.6 is MoE (~3B of 35B params active per token);
+# Qwen3.8 (both checkpoints) is DENSE (all 27B params active every token) —
+# roughly 9x more weight to stream through memory per generated token,
+# independent of kernel efficiency. This reframes the earlier "immature
+# SM121 kernel support" theory from the Unsloth investigation — that
+# framing is likely wrong, or at best a minor contributor next to the
+# architectural one. A newer vLLM/CUTLASS build is less likely to close this
+# gap than earlier assumed; a genuinely faster Qwen3.8 config on this
+# hardware would need either a smaller/sparser (MoE) variant of this model
+# family, or accepting dense-model throughput as inherently lower here.
+# qwen3.6 remains the default and the only proven-fast option (~83 tok/s).
+# This file is left configured for Inferact + --linear-backend marlin
+# (the best-tested combination) rather than reverted to Unsloth or to the
+# native kernel — no evidence any of the three options tried is meaningfully
+# better than the others.
+#
+# =============================================================================
+# PROVENANCE (Inferact checkpoint) — what's verified vs. assumed
+# =============================================================================
+#   VERIFIED — checked directly against primary sources this session:
+#     - config.json facts listed above (architecture, quantization, ignored
+#       layers, context length) — fetched from
+#       https://huggingface.co/Inferact/Qwen3.8-27B-NVFP4/raw/main/config.json
+#     - vLLM compatibility: same Qwen3_5ForConditionalGeneration class already
+#       confirmed registered in the pulled vllm/vllm-openai:nightly image
+#       (see the pinned digest note under "Image:" below) — no new pull
+#       needed, no new registry check needed.
+#
+#   FROM THE VLLM RECIPE (recipes.vllm.ai/Qwen/Qwen3.8-27B) — a real primary
+#   source for deployment flags, but its benchmark NUMBERS are from 2x RTX
+#   5090, not GB10:
+#     - --tool-call-parser qwen3_coder (the recipe's explicit recommendation
+#       for THIS checkpoint — different from qwen3_xml, which was only ever
+#       an analogy-based guess for the retired Unsloth checkpoint). Still
+#       UNVERIFIED against a real Cline/Claude Code tool-calling session —
+#       first thing to check if tool calls fail to parse.
+#     - --speculative-config num_speculative_tokens 3 (recipe's recommended
+#       value for this checkpoint, vs. 2 for the Unsloth checkpoint).
+#     - The recipe's single-GPU command needs --enforce-eager and caps
+#       --max-model-len at 32768 to avoid OOM — but that was measured on a
+#       31.4GB-usable RTX 5090. NOT carried forward here: GB10's 128GB
+#       unified memory is a very different budget, and neither of this
+#       project's other two engines need --enforce-eager for full 262144
+#       context. If this checkpoint OOMs where qwen3.6/the old qwen3.8
+#       config didn't, --enforce-eager is the first thing to try, in that
+#       order — not a default assumption.
+#
+#   CARRIED BY ANALOGY from qwen3.6's proven ModelOpt config (same
+#   quant_method, same hardware, same hybrid architecture family):
+#     - --quantization modelopt (explicit, matching qwen3.6's style rather
+#       than relying on auto-detection)
+#     - --mamba-ssm-cache-dtype float32, --kv-cache-dtype fp8,
+#       --load-format fastsafetensors, --attention-backend flashinfer,
+#       --gpu-memory-utilization 0.6 (starting point — re-verify KV cache
+#       size on first real boot, same as every other utilization value in
+#       this file's history; do not assume it's already optimal here)
+#
+#   CONFIRMED via real boots (2026-08-26) — see RESULT/FOLLOW-UP TEST in the
+#   CHECKPOINT SWAP section above for the full detail:
+#     - VLLM_NVFP4_GEMM_BACKEND=marlin is a NO-OP on this vLLM build for this
+#       checkpoint (and was also a no-op for the retired Unsloth checkpoint).
+#     - --linear-backend marlin DOES work (log-confirmed
+#       "MarlinNvFp4LinearKernel" selected) and boots clean — no lm_head
+#       crash, unlike forcing the equivalent on the Unsloth checkpoint.
+#     - Forcing Marlin barely changed throughput (18.55 vs 17.52 tok/s) —
+#       kernel choice is NOT the primary bottleneck for this checkpoint,
+#       ruled out empirically. See the REVISED CONCLUSION above: the gap to
+#       qwen3.6 is much more likely architectural (dense vs. MoE), not a
+#       kernel-selection problem.
+#
+#   NOT CARRIED FORWARD (still doesn't apply — this remains a dense model):
+#     - Any MoE-specific flag/env var (--moe-backend, VLLM_USE_FLASHINFER_MOE_FP4,
+#       VLLM_FP8_MOE_BACKEND, "moe_backend" speculative-config key).
+#
+# Source (checkpoint): https://huggingface.co/Inferact/Qwen3.8-27B-NVFP4
+# Source (recipe):     https://recipes.vllm.ai/Qwen/Qwen3.8-27B
+#
+# Hardware: NVIDIA DGX Spark workstation with GB10 Superchip (128 GB unified memory)
+#
+# Image:    vllm/vllm-openai:nightly (ARM64)
+#           Same digest already pulled/verified for the Unsloth checkpoint —
+#           sha256:95bed119f39e2414973cf7224df31c9a3ed213566138722346d7bd360edf842b
+#           (vLLM 0.26.1rc1.dev1102+ge9d1398d9). Registers
+#           Qwen3_5ForConditionalGeneration (already confirmed). STILL NOT
+#           PINNED — see CLAUDE.md's tag-pinning warning box (this exact
+#           digest collision already caused one real incident on qwen3.6,
+#           2026-08-24, documented in CHANGELOG.md and that file's
+#           corrections history item 18).
+#
+# Model:    Inferact/Qwen3.8-27B-NVFP4
+#           27B dense (NOT MoE), hybrid Gated-DeltaNet + Gated-Attention,
+#           vision encoder included, NVIDIA ModelOpt NVFP4 (W4A4, group
+#           size 16), lm_head NOT quantized (see PROVENANCE above)
+#
+# GB10 memory budget (128GB unified — shared with CPU + every other container):
+#   Weights:            24.97 GiB (confirmed via boot log 2026-08-26 — larger
+#     than the Unsloth checkpoint's 22.13 GiB, consistent with lm_head being
+#     kept unquantized here rather than FP8)
+#   KV cache (fp8):      29.32 GiB available at --gpu-memory-utilization 0.6
+#     with --linear-backend marlin active (confirmed via boot log — real
+#     headroom, no OOM; slightly more than the 24.74 GiB seen with the
+#     native/default kernel path, not yet stress-tested under concurrent load)
+#
+# =============================================================================
+# ARCHIVED — PROVENANCE for the RETIRED unsloth/Qwen3.8-27B-NVFP4 checkpoint
+# =============================================================================
+# Kept for reference (this project's standing policy — see file header).
+# Everything below this line describes the checkpoint this file used from
+# 2026-08-23 through 2026-08-24, before the swap documented above. None of it
+# applies to the current Inferact checkpoint except where explicitly noted as
+# "carried by analogy" in the PROVENANCE section above.
 # =============================================================================
 # This is a NEW file with no boot history yet, unlike qwen3.6's file (which
 # accumulated 17 corrections from real boots). Flags below fall into three
@@ -456,10 +652,13 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # vLLM Engine — unsloth/Qwen3.8-27B-NVFP4
+  # vLLM Engine — Inferact/Qwen3.8-27B-NVFP4 (ModelOpt)
   # NVIDIA DGX Spark — GB10 Superchip (128GB unified memory)
-  # See the PROVENANCE header at the top of this file for what's verified
-  # vs. assumed in the command/environment below.
+  # Swapped from unsloth/Qwen3.8-27B-NVFP4 on 2026-08-24 — see the CHECKPOINT
+  # SWAP note at the top of this file for the full why, and the PROVENANCE
+  # section right after it for what's verified vs. assumed in the
+  # command/environment below. The ARCHIVED section further down preserves
+  # the retired Unsloth checkpoint's full investigation history.
   # ---------------------------------------------------------------------------
   qwen3-8-27b-nvfp4-engine:
     image: vllm/vllm-openai:nightly
@@ -471,9 +670,9 @@ services:
       - "8301:8000"
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
-      # Separate cache volumes from qwen3.6's engine — different model,
-      # different autotune cache key. Keeping both around lets you switch
-      # back and forth between the two compose files without cache thrashing.
+      # Same cache volumes as the retired Unsloth checkpoint used — different
+      # model means a different autotune cache key regardless, so this just
+      # re-tunes fresh into the same volume rather than needing a rename.
       - vllm-qwen38-compile-cache:/root/.cache/vllm
       - vllm-qwen38-flashinfer-cache:/root/.cache/flashinfer
       - vllm-qwen38-triton-cache:/root/.triton/cache
@@ -483,49 +682,13 @@ services:
       FLASHINFER_DISABLE_VERSION_CHECK: "1"
       CUTE_DSL_ARCH: sm_121a                # GB10 Blackwell SM architecture — hardware fact, model-independent
       VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
-      # THROUGHPUT INVESTIGATION (2026-08-23) — CONCLUDED, both levers tried
-      # and reverted. Measured baseline: median generation throughput 19.5-
-      # 20.1 tok/s vs qwen3.6's ~40 tok/s, with 96% GPU utilization but only
-      # ~34W power draw during generation (GPU kept busy without doing much
-      # real compute per unit time — consistent with immature SM121 kernel
-      # support for this quantization scheme, not a hardware ceiling).
-      #
-      #   Tried: VLLM_NVFP4_GEMM_BACKEND=marlin alone. NO EFFECT — kernel-
-      #   selection log was identical before/after ("Using
-      #   FlashInferCutlassNvFp4LinearKernel for NVFP4 GEMM"), and a real
-      #   (non-cached) generation measured the same 20.1 tok/s. This env var
-      #   is specific to the ModelOpt quantization scheme (qwen3.6's
-      #   checkpoint) and is not read by the compressed-tensors NVFP4-pack
-      #   scheme this checkpoint uses.
-      #
-      #   Tried: --linear-backend marlin + VLLM_TEST_FORCE_FP8_MARLIN=1
-      #   together (forces BOTH NVFP4 and FP8 layers through Marlin —
-      #   confirmed via log: "Selected MarlinFP8ScaledMMLinearKernel for
-      #   CompressedTensorsW8A8Fp8" / "Using MarlinNvFp4LinearKernel for
-      #   NVFP4 GEMM", so the flag *was* respected this time, unlike the
-      #   NVFP4-only attempt above). CRASHED on every boot attempt:
-      #     AttributeError: 'ParallelLMHead' object has no attribute
-      #     'output_size_per_partition'
-      #   in vllm/model_executor/layers/quantization/utils/marlin_utils_fp8.py
-      #   prepare_fp8_layer_for_marlin(). Root cause: this checkpoint's
-      #   lm_head is itself FP8-quantized (per the HF model card), and
-      #   vLLM's Marlin FP8 weight-prep path doesn't handle the
-      #   ParallelLMHead layer type — a real vLLM bug for this specific
-      #   model, not a config problem. Different failure mode than qwen3.6
-      #   hit trying the same flag (qwen3.6's GDN attention projection
-      #   layers failed a different way) — same flag, same hardware, two
-      #   different incompatibilities on two different checkpoints.
-      #
-      #   CONCLUSION: no working lever currently exists in this vLLM build
-      #   to change kernel selection for this checkpoint away from the
-      #   default (Cutlass NVFP4 + Cutlass/DeepGEMM FP8). The ~20 tok/s
-      #   baseline appears to require either (a) a newer vLLM/CUTLASS build
-      #   with better SM121-tuned kernels for compressed-tensors NVFP4+FP8,
-      #   or (b) a fix to the Marlin FP8 lm_head bug found above, upstream.
-      #   Neither requires a new NVIDIA driver/firmware release — this is a
-      #   software/kernel-library maturity gap, not a hardware limitation.
-      #   Re-test after pulling a newer vllm/vllm-openai:nightly.
-      #
+      # CONFIRMED NO-OP for this checkpoint (tested 2026-08-26, twice — with
+      # and without --linear-backend marlin below): kernel selection is
+      # controlled by --linear-backend, not this legacy env var, on this
+      # vLLM build. Left set anyway — harmless, and --linear-backend marlin
+      # is the flag actually doing the work now (see RESULT/FOLLOW-UP TEST
+      # in the file header).
+      VLLM_NVFP4_GEMM_BACKEND: marlin
       # ESCAPE HATCH (leave commented): if generation output looks wrong
       # after a FlashInfer autotune cache load on a newer nightly, uncomment
       # to disable the persistent cache and report upstream.
@@ -553,25 +716,35 @@ services:
       retries: 120
       start_period: 3600s
     # ---------------------------------------------------------------------------
-    # --speculative-config: num_speculative_tokens defaults to 2, matching the
-    # exact value in Unsloth's own documented example for this model (see
-    # PROVENANCE header). QWEN38_NUM_SPECULATIVE_TOKENS (.env) is an A/B
-    # toggle, same pattern as qwen3.6's QWEN36_NUM_SPECULATIVE_TOKENS — no
-    # "moe_backend" key here, since this is a dense model (see PROVENANCE).
+    # --quantization modelopt: explicit, matching qwen3.6's style (this
+    # checkpoint's compressed weights auto-detect too, but being explicit
+    # matches this project's convention for the proven-good scheme).
     #
-    # --override-generation-config uses the "Thinking Mode" defaults from
-    # Unsloth's docs (temperature 1.0). The model also has separately
-    # documented "Instruct Mode" defaults (temperature 0.7, top_p 0.80,
-    # presence_penalty 1.5) if you want faster/more deterministic output for
-    # agentic tool-calling and find thinking-mode traces aren't worth the
-    # extra tokens for this use case — swap these values to switch.
+    # --tool-call-parser qwen3_coder: the vLLM recipe's explicit recommendation
+    # for THIS checkpoint (recipes.vllm.ai/Qwen/Qwen3.8-27B) — different from
+    # qwen3_xml, which was only ever an analogy-based guess for the retired
+    # Unsloth checkpoint. Still UNVERIFIED against a real Cline/Claude Code
+    # tool-calling session — see PROVENANCE section at top of file.
+    #
+    # --speculative-config: num_speculative_tokens defaults to 3, matching the
+    # vLLM recipe's recommendation for this checkpoint (the retired Unsloth
+    # checkpoint used 2, per its own docs). QWEN38_NUM_SPECULATIVE_TOKENS
+    # (.env) is an A/B toggle, same pattern as qwen3.6's
+    # QWEN36_NUM_SPECULATIVE_TOKENS — no "moe_backend" key here, dense model.
+    #
+    # --override-generation-config: kept at the retired Unsloth checkpoint's
+    # "Thinking Mode" defaults (temperature 1.0) as a reasonable carry-over —
+    # NOT yet verified against any Inferact-specific documented sampling
+    # defaults (none found during this swap's research). Revisit if output
+    # quality looks off.
     # ---------------------------------------------------------------------------
     command: >
-      unsloth/Qwen3.8-27B-NVFP4
+      Inferact/Qwen3.8-27B-NVFP4
       --served-model-name qwen3.8-27b
       --host 0.0.0.0
       --port 8000
       --dtype auto
+      --quantization modelopt
       --kv-cache-dtype fp8
       --tensor-parallel-size 1
       --gpu-memory-utilization 0.6
@@ -583,13 +756,14 @@ services:
       --load-format fastsafetensors
       --mamba-ssm-cache-dtype float32
       --attention-backend flashinfer
+      --linear-backend marlin
       --uvicorn-log-level warning
       --trust-remote-code
       --enable-auto-tool-choice
-      --tool-call-parser qwen3_xml
+      --tool-call-parser qwen3_coder
       --reasoning-parser qwen3
       --enable-prefix-caching
-      --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN38_NUM_SPECULATIVE_TOKENS:-2}}'
+      --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN38_NUM_SPECULATIVE_TOKENS:-3}}'
       --default-chat-template-kwargs '{"preserve_thinking":true}'
       --override-generation-config '{"temperature":1.0,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
     restart: unless-stopped
