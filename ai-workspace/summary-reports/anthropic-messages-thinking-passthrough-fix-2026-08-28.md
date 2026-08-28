@@ -321,6 +321,19 @@ messages so turn alternation stays valid for the rest of the translation pipelin
    the `local` profile after this fix was deployed. Result: an identical, correctly-formatted 10-skill table,
    now matching the `vllm` (direct) profile's output — the original symptom this entire investigation started
    from is resolved.
+3. **Ruled out caching as an explanation for (1) and (2)**, since both used a request very similar to one already
+   sent earlier in the session. Restarted `qwen3-6-35b-nvfp4-engine` directly (`docker restart`) — clean reboot
+   in ~2 minutes (FlashInfer autotune cache hit, no re-tuning, no errors), confirmed via `/health` and startup
+   logs. Did *not* flush the shared Redis instance, since it also serves as Langfuse's event queue — a blind
+   flush risked losing in-flight observability events for an unrelated concern. Instead, replayed the captured
+   request again with a random UUID nonce appended to the final user turn, guaranteeing a novel cache key
+   regardless of whether `anthropic_messages` calls are actually wrapped by litellm's `acompletion`-scoped Redis
+   cache (config's `supported_call_types` only lists `acompletion`/`completion`, suggesting it may not apply to
+   this route at all, but the nonce sidesteps needing to resolve that ambiguity). Result: identical correct
+   11-skill output against the freshly-restarted engine. The user then independently re-ran "list your skills"
+   from a brand-new Windows Claude Code session (fresh process, not `--resume`d) and got the same correct result.
+   Combined, this rules out both LiteLLM's Redis cache and vLLM's prefix cache as an explanation for the fix
+   appearing to work.
 
 ### Not yet done
 
