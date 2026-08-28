@@ -813,8 +813,9 @@ services:
       --uvicorn-log-level warning
       --trust-remote-code
       --enable-auto-tool-choice
-      --tool-call-parser qwen3_coder
+      --tool-call-parser qwen3_xml
       --reasoning-parser qwen3
+      --mm-encoder-tp-mode data
       --enable-prefix-caching
       --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN36_NUM_SPECULATIVE_TOKENS:-3},"moe_backend":"triton"}'
       --default-chat-template-kwargs '{"preserve_thinking":true}'

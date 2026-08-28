@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`docker-compose.qwen3.6.yml`: added `--mm-encoder-tp-mode data`, changed `--tool-call-parser qwen3_coder` →
+  `qwen3_xml`, added `--reasoning-parser qwen3` (2026-08-28).** Three engine optimizations:
+  - `--mm-encoder-tp-mode data`: Switches multi-modal encoder from weight-splitting tensor parallelism to
+    data-parallel mode (each GPU holds full weights, splits batch across GPUs). This improves throughput
+    when the encoder is compute-bound rather than memory-bound. Source: vLLM's `MMEncoderTPMode` config type.
+  - `--tool-call-parser qwen3_xml`: Changed from `qwen3_coder` to align with the official vLLM recipe at
+    `recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B`. Previously verified that `qwen3_coder` worked correctly in tool-calling
+    tests; this change is evidence-based (official recipe) rather than empirically verified against current traffic.
+  - `--reasoning-parser qwen3`: New explicit parser for Qwen3-family models to ensure proper extraction of
+    chain-of-thought reasoning traces.
+  - Full details in `ai-workspace/summary-reports/qwen3.6-engine-optimizations-2026-08-28.md`.
+
 - **`litellm-callbacks/anthropic_input_text_fix.py`: found and fixed the actual root cause of the skills-listing
   gap — `role: "system"` messages injected mid-conversation were silently dropped whole** (2026-08-28). The two
   fixes above narrowed the problem but didn't close it: real-world retesting from the Windows Claude Code client
