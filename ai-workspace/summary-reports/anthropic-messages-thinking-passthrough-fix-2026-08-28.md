@@ -4,6 +4,15 @@
 **Branch:** `fix/anthropic-messages-thinking-passthrough` (branched off `feat/qwen3.8-27b-nvfp4-stack`)
 **Base:** current working tree, following commit `d15d632`
 
+Two related but distinct bugs in LiteLLM's Anthropic `/v1/messages` translation for `openai/`-prefixed backends
+were found and fixed in this session: **Part 1** (response-side — `thinking` blocks dropped) and **Part 2**
+(request-side — `input_text`/`output_text` system/message blocks dropped), the latter found via real-world
+reproduction on a second machine after Part 1 was already fixed and deployed.
+
+---
+
+## Part 1: Response-side — `thinking` blocks dropped
+
 ---
 
 ## Symptom
@@ -130,3 +139,115 @@ else changes behavior.
   calls out a streaming-path variant of this bug family; this session only exercised non-streaming requests.
 - Neither `docker-compose.qwen3.6.yml`'s nor `docker-compose.qwen3.8.yml`'s vLLM image digest pinning (flagged as
   outstanding in the 2026-08-24 report) was addressed in this session — unrelated to this fix, still open.
+
+---
+
+## Part 2: Request-side — `input_text`/`output_text` blocks dropped
+
+### Symptom (real-world reproduction, after Part 1 was already deployed)
+
+On a second machine (Windows, Claude Code v2.1.241, using the `claude-provider-switch` skill to toggle between
+provider profiles): asking "list your skills" through the `litellm` profile got a generic non-answer claiming no
+skills were configured; the identical question through the `vllm` (direct) profile correctly listed all 10
+configured skills in a formatted table. Same model (`qwen3.6-35b-a3b`), same underlying skill configuration —
+this is the exact symptom the original investigation set out to explain, now reproduced against a real Claude
+Code client (not a synthetic request) and confirmed to persist even after Part 1's fix was live on the proxy —
+proving it's a separate bug.
+
+### Investigation
+
+Reproduced with a synthetic Anthropic-format request whose `system` field mixes block types — one `"text"` block,
+one `"input_text"` block (the type [upstream issue #23841](https://github.com/BerriAI/litellm/issues/23841)
+names as what Claude Code CLI sends for parts of its system prompt and user messages):
+
+- **Direct vLLM (`:8301`)**: rejected the request outright with a `400` — `input_text` is not a valid Anthropic
+  content-block type per vLLM's own strict validator (only `text`, `image`, `tool_use`, `tool_result`,
+  `tool_reference`, `thinking`, `redacted_thinking` accepted).
+- **Via LiteLLM (`:4000`)**: returned `200 OK`, but the model's own reasoning gave it away — *"I don't have a
+  predefined list of 'skill names' in my system prompt."* The `input_text` block's content never reached the
+  model at all.
+
+Confirmed in source: `_add_system_message_to_messages()` in
+`litellm/llms/anthropic/experimental_pass_through/adapters/transformation.py` only forwards blocks where
+`block.get("type") == "text"`:
+
+```python
+for block in system_content:
+    if isinstance(block, dict) and block.get("type") == "text":
+        ...append...
+    # no else — anything not "text" is silently discarded, no error, no log
+```
+
+The same narrow-type filtering exists in the user-message content-block loop
+(`translate_anthropic_messages_to_openai()`, same file) and, per issue #23841, in three separate spots in the
+Responses API adapter (`responses_adapters/transformation.py`) as well. This means **Part 1's fix doesn't help
+here** — switching between the chat/completions and Responses API routing paths doesn't matter, since both share
+this exact flaw.
+
+### Why a pass-through bypass wasn't used
+
+Considered routing `/v1/messages` straight to vLLM's native endpoint via `pass_through_endpoints` (as floated as
+an alternative for Part 1). Checked `SafeRouteAdder` in
+`litellm/proxy/pass_through_endpoints/pass_through_endpoints.py`: it only registers a pass-through route if the
+exact path+method isn't already registered on the app — and `/v1/messages` is already claimed by litellm's own
+built-in (buggy) handler, so a same-path bypass would silently no-op. A different path would require
+reconfiguring Claude Code's `claude-provider-switch litellm` profile client-side, which is out of scope without
+touching the Windows machine directly. Also worth noting: vLLM's strict validator rejects `input_text` outright
+(400), so a bypass wouldn't necessarily be a strict improvement anyway — it trades silent data loss for a hard
+failure on any non-conformant block, unless Claude Code's real request never actually contains one when talking
+to that profile (unconfirmed either way, since the real raw request wasn't captured).
+
+### Fix
+
+New `litellm-callbacks/anthropic_input_text_fix.py` — a `CustomLogger.async_pre_call_hook` callback (litellm's
+documented custom-callback extension point) that normalizes `type: "input_text"`/`"output_text"` blocks to
+`type: "text"` on the raw request body, before any of litellm's translation code runs:
+
+```yaml
+litellm_settings:
+  callbacks: ["langfuse_otel", "anthropic_input_text_fix.proxy_handler_instance"]
+```
+
+Chosen over patching litellm's own vendor files directly (which was the other option — e.g. loosening the
+`== "text"` check in `_add_system_message_to_messages`): `async_pre_call_hook` is a documented, stable API
+(https://docs.litellm.ai/docs/observability/custom_callback), whereas the vendor source lives inside a mutable
+`:main-latest` image and any direct edit would need re-applying (and re-verifying line-for-line) on every image
+pull. The hook operates on `data["system"]` and every message's `data["messages"][i]["content"]` at the raw-JSON
+level — before litellm splits `system` off into a separate function parameter — which is also why this couldn't
+be done via the *other* documented hook already used for the responses-API-vs-thinking distinction
+(`async_pre_request_hook`): that hook's call site in
+`litellm/llms/anthropic/experimental_pass_through/messages/handler.py` only exposes `messages`, not `system`, to
+registered callbacks (confirmed by reading the exact `**kwargs` spread — `system` is an explicit named parameter
+of `anthropic_messages()`, so it's never part of the kwargs dict handed to that hook).
+
+Mounted into all four compose files' independently-defined `litellm-proxy` service (`docker-compose.qwen3.6.yml`,
+`docker-compose.qwen3.8.yml`, `docker-compose.yml`, `docker-compose.nemotron.yml`) at
+`/app/anthropic_input_text_fix.py` — litellm resolves `callbacks:` module paths relative to the mounted config
+file's own directory (`/app`, since the config is mounted at `/app/config.yaml`), confirmed by reading
+`get_instance_fn()` in `litellm/proxy/types_utils/utils.py`.
+
+### Testing performed
+
+1. Recreated `litellm-proxy` via `docker compose -f docker-compose.qwen3.6.yml up -d --no-deps litellm` — a plain
+   `docker restart` does not pick up new volume mounts, only `up -d`/recreate does.
+2. Polled `/health/liveliness` until `200 OK`; checked full startup logs for import/callback-load errors — none
+   found.
+3. Re-sent the exact `input_text`-containing reproduction request through `POST :4000/v1/messages`:
+   `usage.input_tokens` went from `45` (block dropped) to `63` (block forwarded, matching the added content's
+   token count), and the model's reasoning now correctly reproduces both skill names (`zeta-skill`,
+   `omega-skill`) from the previously-invisible block.
+
+### Not yet done
+
+- Not verified against the real Windows Claude Code client — only reproduced with a synthetic request matching
+  the block type issue #23841 documents. The exact block type(s) and structure Claude Code v2.1.241 actually
+  sends for its system-reminder/skill-listing content were never captured directly; if it turns out to differ
+  from `input_text`/`output_text`, this fix would need extending.
+- No equivalent fix/verification was done for the same drop pattern potentially present in assistant-message
+  `tool_use`/`thinking` block translation, or for streaming requests — only non-streaming `system` + user-message
+  content blocks were exercised.
+- The callback is global (`litellm_settings.callbacks` applies proxy-wide), not scoped to `anthropic_messages`
+  call type specifically — deliberate, since `input_text`/`output_text` block types don't collide with any
+  existing OpenAI chat-completions content-block type, making the no-op case for other call types safe, but
+  this wasn't stress-tested against every other route this proxy serves (embeddings, plain chat completions,
+  the `anthropic/*` passthrough).

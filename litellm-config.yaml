@@ -130,7 +130,11 @@ litellm_settings:
   # as any other unmapped model group.
   default_fallbacks: ["qwen3.6-35b-a3b"]
   turn_off_message_logging: false
-  callbacks: ["langfuse_otel"]
+  # anthropic_input_text_fix: normalizes Anthropic /v1/messages content
+  # blocks with type "input_text"/"output_text" to "text" before litellm's
+  # own translation silently drops them (see litellm-callbacks/ and
+  # CHANGELOG.md — matches https://github.com/BerriAI/litellm/issues/23841).
+  callbacks: ["langfuse_otel", "anthropic_input_text_fix.proxy_handler_instance"]
 
   # Redis exact-match prompt cache
   # ttl=3600: cached responses expire after 1 hour.

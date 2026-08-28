@@ -6,6 +6,52 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **New `litellm-callbacks/anthropic_input_text_fix.py`: fixed `/v1/messages` silently dropping non-`"text"`
+  content blocks (`"input_text"`/`"output_text"`) from the system prompt and message history** (2026-08-28),
+  found via real-world reproduction on a second machine: a Claude Code v2.1.241 session on Windows, talking to
+  this same `qwen3.6-35b-a3b` model, correctly listed all 10 configured skills when using the
+  `claude-provider-switch` skill's `vllm` (direct) profile, but the identical question via the `litellm` profile
+  got a generic non-answer claiming no skills existed — the exact symptom the earlier thinking-block investigation
+  set out to explain, now reproduced against a real Claude Code client rather than a synthetic request. This is a
+  **separate bug from the thinking-block fix below**: that one was response-side (model reasoning stripped on the
+  way out); this one is request-side (part of the system prompt stripped on the way in, before vLLM ever sees it).
+  - **Reproduced directly**: sent an Anthropic-format request with `system` containing one `"text"` block and one
+    `"input_text"` block (the type upstream issue
+    [#23841](https://github.com/BerriAI/litellm/issues/23841) names as the culprit for Claude Code CLI) to both
+    endpoints. Direct vLLM (`:8301`) **rejected it outright** with a `400` (`input_text` is not a valid Anthropic
+    content-block type per vLLM's own strict validator: only `text`, `image`, `tool_use`, `tool_result`,
+    `tool_reference`, `thinking`, `redacted_thinking` are accepted). Via LiteLLM (`:4000`), the request returned
+    `200 OK` but the model's own reasoning gave it away: *"I don't have a predefined list of 'skill names' in my
+    system prompt"* — the `input_text` block's content never reached it. Root cause confirmed in source:
+    `_add_system_message_to_messages()` in
+    `litellm/llms/anthropic/experimental_pass_through/adapters/transformation.py` only forwards blocks where
+    `block.get("type") == "text"`; anything else is silently skipped, no error, no log. The same narrow-type
+    filtering exists in the user-message content-block loop (`translate_anthropic_messages_to_openai()`) and,
+    per #23841, in three spots in the Responses API adapter too — so this is **not fixable by the
+    `use_chat_completions_url_for_anthropic_messages` flag** used for the thinking-block fix; both translation
+    paths share the flaw.
+  - **Why a pass-through bypass wasn't used here**: LiteLLM's `SafeRouteAdder` (in
+    `litellm/proxy/pass_through_endpoints/pass_through_endpoints.py`) only registers a `pass_through_endpoints`
+    route if the exact path+method isn't already registered — and `/v1/messages` is already claimed by litellm's
+    own (buggy) built-in handler, so a same-path bypass silently no-ops. A different path would need Claude
+    Code's `claude-provider-switch litellm` profile reconfigured client-side, out of scope without touching the
+    Windows machine.
+  - **Fix**: a `CustomLogger.async_pre_call_hook` callback (`litellm-callbacks/anthropic_input_text_fix.py`,
+    registered via `litellm_settings.callbacks`) that normalizes `type: "input_text"`/`"output_text"` blocks to
+    `type: "text"` on the raw request body — before any of litellm's lossy translation code runs, and independent
+    of which routing path (chat/completions vs. Responses API) is active. Chosen over patching litellm's own
+    source files directly: `async_pre_call_hook` is a documented, stable extension point, whereas the vendor
+    files live inside a mutable `:main-latest` image and would silently rot (or need re-syncing) on every image
+    pull. Mounted into all four compose files' `litellm-proxy` service (each defines it independently, per
+    `litellm-config.yaml`'s own header comment on the shared-config design) at `/app/anthropic_input_text_fix.py`,
+    since litellm resolves `callbacks:` module paths relative to the mounted config file's directory (`/app`).
+  - **Verified**: recreated `litellm-proxy` (a plain restart doesn't pick up new volume mounts), re-sent the same
+    `input_text`-containing request through `:4000/v1/messages` — `usage.input_tokens` went from `45` (block
+    dropped) to `63` (block forwarded, matching the added content's token count), and the model's reasoning now
+    correctly reproduces both skill names from the previously-invisible block.
+  - Full investigation and reproduction detail (both fixes) is in
+    `ai-workspace/summary-reports/anthropic-messages-thinking-passthrough-fix-2026-08-28.md`.
+
 - **`litellm-config.yaml`: fixed `/v1/messages` silently dropping `thinking` content blocks for the `openai/`-
   prefixed vLLM backends** (2026-08-28), found while investigating why Claude Code could enumerate a large
   skill/tool listing when pointed directly at vLLM (`:8301`) but not through LiteLLM (`:4000`). Root cause,
