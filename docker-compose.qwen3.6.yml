@@ -387,6 +387,28 @@
 #      for 8*(1+3)=32) — changing max-num-seqs alone without this would have
 #      silently reintroduced the mid-inference Triton JIT warmup-gap issue
 #      that --compilation-config was originally added to fix.
+#  21. --default-chat-template-kwargs: added "enable_thinking":false (2026-09-02).
+#      Root cause of the reported symptom "long YouTrack tickets with many
+#      requirements — some tasks never get implemented" was NOT the tool-call
+#      parser (qwen3_xml was independently confirmed correct against a freshly
+#      pasted copy of the official recipes.vllm.ai DGX-Spark command — exact
+#      match on every flag). It's reasoning-token consumption competing with
+#      the SAME per-request max_tokens budget as the actual output/tool-calls.
+#      Verified directly against this engine (9-requirement synthetic ticket,
+#      max_tokens=3000, thinking left at the prior default/on): reasoning
+#      consumed 2728/3000 tokens (91%) in one run, 2123/2949 (72%) in another —
+#      highly variable — and the truncated run cut off mid-plan at requirement
+#      4 of 9, never reaching 5-9. With "enable_thinking":false on the same
+#      request: reasoning_tokens=0, full budget went to actual content, all 9
+#      requirements present in the output. Real tradeoff, not a free win: this
+#      turns off the "thinking" reasoning pass entirely for requests that don't
+#      override it per-call, which may reduce quality on harder reasoning-heavy
+#      problems — chosen anyway because reliably finishing every requirement on
+#      a long ticket was the stated priority. "preserve_thinking":true is left
+#      in place (harmless no-op with no reasoning to preserve) rather than
+#      removed, in case this is reverted later. If per-request quality on hard
+#      problems regresses, the other lever (raising Cline's own max_tokens for
+#      this model, client-side) is the one to try first before reverting this.
 #
 # External ports (reachable from other machines):
 #   3000  — Langfuse UI + API
@@ -818,7 +840,7 @@ services:
       --mm-encoder-tp-mode data
       --enable-prefix-caching
       --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN36_NUM_SPECULATIVE_TOKENS:-3},"moe_backend":"triton"}'
-      --default-chat-template-kwargs '{"preserve_thinking":true}'
+      --default-chat-template-kwargs '{"preserve_thinking":true,"enable_thinking":false}'
       --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
     # ---------------------------------------------------------------------------
     # DEBUG VARIANT — if the run hangs in FlashInfer autotuning again, comment out
@@ -854,7 +876,7 @@ services:
     #   --reasoning-parser qwen3
     #   --enable-prefix-caching
     #   --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN36_NUM_SPECULATIVE_TOKENS:-3},"moe_backend":"triton"}'
-    #   --default-chat-template-kwargs '{"preserve_thinking":true}'
+    #   --default-chat-template-kwargs '{"preserve_thinking":true,"enable_thinking":false}'
     #   --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
     restart: unless-stopped
 

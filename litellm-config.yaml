@@ -10,8 +10,11 @@
 #
 # qwen3.6-35b-a3b is the PRIMARY/DEFAULT entry (docker-compose.qwen3.6.yml,
 # port 8301, --served-model-name qwen3.6-35b-a3b → openai/qwen3.6-35b-a3b).
-# --tool-call-parser qwen3_coder — verified against a real 5-tool tool-calling
-# test 2026-08-27 (docker-compose.qwen3.6.yml corrections item 19).
+# --tool-call-parser qwen3_xml — confirmed correct against a directly-pasted copy of
+# the official recipes.vllm.ai DGX-Spark command (2026-09-02, docker-compose.qwen3.6.yml
+# corrections item 21). NOT the qwen3_coder value verified via a live tool-calling test
+# on 2026-08-27 (item 19) — that verification predates this flag's most recent flip back
+# to qwen3_xml and does not carry over to it.
 #
 # qwen3.8-27b is KEPT (not deleted), reachable if docker-compose.qwen3.8.yml
 # is brought up instead — but it's EXPERIMENTAL, not the default. Checkpoint
@@ -27,10 +30,12 @@
 #   35B MoE (3B activated), NVFP4 quantized (NVIDIA ModelOpt)
 #   Engine port: 8301
 #   Vision support: no (text-only MoE checkpoint)
-#   Reasoning parser: qwen3 (required to prevent thinking tokens in output)
-#   Tool-call parser: qwen3_coder (per the official vLLM recipe for this
-#     checkpoint/hardware; verified against a real 5-tool tool-calling test
-#     2026-08-27 — see docker-compose.qwen3.6.yml corrections item 19)
+#   Reasoning parser: qwen3 (required to prevent thinking tokens in output; the
+#     "thinking" pass itself is disabled by default via enable_thinking:false as of
+#     2026-09-02 — see docker-compose.qwen3.6.yml corrections item 21)
+#   Tool-call parser: qwen3_xml (matches the official vLLM recipe for this
+#     checkpoint/hardware, confirmed 2026-09-02 — see docker-compose.qwen3.6.yml
+#     corrections item 21)
 #   max-model-len: 262144 (vLLM --max-model-len; full context window)
 # =============================================================================
 

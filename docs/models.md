@@ -70,8 +70,13 @@ history) is in `docker-compose.qwen3.8.yml`'s header.
 - **MoE Architecture**: 35B total, 3B activated per token — efficient inference
 - **Text-Only**: No vision encoder; all memory available for KV cache
 - **Native Reasoning**: `--reasoning-parser qwen3` prevents thinking tokens in output
-- **Native Tool Calling**: `--tool-call-parser qwen3_coder` (per the official vLLM recipe; verified against a
-  real 5-tool tool-calling test 2026-08-27)
+- **Native Tool Calling**: `--tool-call-parser qwen3_xml` (matches the official vLLM recipe, confirmed 2026-09-02
+  against a freshly-pasted copy of the recipe's exact command — this flag flip-flopped repeatedly before that;
+  see `docker-compose.qwen3.6.yml` corrections item 21)
+- **Thinking disabled by default**: `--default-chat-template-kwargs '{"enable_thinking":false}'` (2026-09-02) —
+  the reasoning pass was found to consume 72-91% of a constrained `max_tokens` budget on long, multi-requirement
+  tickets, truncating later requirements before the model acted on them; verified fixed both directly against
+  the engine and end-to-end via a real Cline CLI run against a cloned repo
 - **Speculative Decoding**: MTP (Multi-step Predictive Training) support
 
 #### Use Cases
@@ -193,7 +198,7 @@ history) is in `docker-compose.qwen3.8.yml`'s header.
 | **Quantization** | NVFP4+FP8 (compressed-tensors) | NVFP4 (ModelOpt) | FP8 | NVFP4 | NVFP4 |
 | **Output Format** | Standard JSON | Standard JSON | Standard JSON | Reasoning blocks | 2048-dim vector |
 | **Vision** | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No |
-| **Tool Calling** | Native (qwen3_coder, unverified) | Native (qwen3_coder, verified) | Native (qwen3_coder) | Requires parser | N/A |
+| **Tool Calling** | Native (qwen3_xml, unverified) | Native (qwen3_xml) | Native (qwen3_coder) | Requires parser | N/A |
 | **Best For** | Coding (rollback) | Coding (Cline/Claude Code), default | Coding tasks | General reasoning | Embeddings/RAG |
 | **Runs Concurrently** | ❌ | ❌ | ❌ | ❌ | ✅ Yes |
 
@@ -267,14 +272,20 @@ qwen3-6-35b-nvfp4-engine:
     --moe-backend marlin
     --max-cudagraph-capture-size 256
     --compilation-config '{"cudagraph_capture_sizes":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,48,64,96,128,192,256]}'
-    --tool-call-parser qwen3_coder
+    --tool-call-parser qwen3_xml
     --reasoning-parser qwen3
     --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN36_NUM_SPECULATIVE_TOKENS:-3},"moe_backend":"triton"}'
+    --default-chat-template-kwargs '{"preserve_thinking":true,"enable_thinking":false}'
 ```
 
-`--gpu-memory-utilization 0.5`, `--max-num-seqs 8`, and `--tool-call-parser qwen3_coder` were aligned to the
-official vLLM recipe on 2026-08-27 (previously `0.6`/`4`/`qwen3_xml`) — see `docker-compose.qwen3.6.yml`
-corrections items 19-20 for the full diff and verification (including a real 5-tool tool-calling test).
+`--gpu-memory-utilization 0.5` and `--max-num-seqs 8` were aligned to the official vLLM recipe on 2026-08-27 —
+see `docker-compose.qwen3.6.yml` corrections items 19-20 for the full diff and verification (including a real
+5-tool tool-calling test). `--tool-call-parser` flip-flopped repeatedly after that (items 16/17/19/20) before
+settling back on `qwen3_xml` on 2026-09-02 by diffing a freshly-pasted copy of the official recipe's exact
+command — an exact match on every flag (item 21). `enable_thinking:false` was added the same day: the reasoning
+pass was found to consume 72-91% of a constrained `max_tokens` budget on long, multi-requirement tickets,
+truncating later requirements before the model ever acted on them — disabling it by default fixed this, verified
+both directly against the engine and end-to-end via a real Cline CLI run against a cloned open-source repo.
 
 `--compilation-config`'s `cudagraph_capture_sizes` is densified across 1-32 because that's the effective decode-batch
 range for this engine: `--max-num-seqs 8` combined with MTP's per-sequence verification query length of
@@ -351,8 +362,8 @@ nemotron-embed-engine:
 
 - You're doing **coding tasks** with Cline/Claude Code — this is the primary/default stack, ~83 tok/s
 - You need **large context** (up to 262K tokens) for long documents
-- You need **native tool calling** — `qwen3_coder` parser, verified against a real 5-tool tool-calling test
-  (2026-08-27, see `docker-compose.qwen3.6.yml` corrections item 19)
+- You need **native tool calling** — `qwen3_xml` parser, confirmed against the official recipe 2026-09-02
+  (see `docker-compose.qwen3.6.yml` corrections item 21)
 - You want **fast restarts** with FlashInfer cache persistence (already warmed from prior use)
 - You need **efficient memory usage** (only ~22GB weights)
 

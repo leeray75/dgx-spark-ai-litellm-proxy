@@ -6,6 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`docker-compose.qwen3.6.yml`: added `"enable_thinking":false` to `--default-chat-template-kwargs`, confirmed
+  `--tool-call-parser qwen3_xml` against a freshly-pasted official recipe (2026-09-02).** Root cause of a real
+  user-reported symptom — "long tickets with many requirements, some tasks never get implemented" — was found to
+  be reasoning-token consumption competing with the actual output for the same per-request `max_tokens` budget:
+  a synthetic 9-requirement ticket at `max_tokens=3000` measured 72-91% of the budget spent on the model's
+  internal reasoning trace across repeated runs, with one run truncating mid-plan at requirement 4 of 9.
+  `enable_thinking:false` eliminates this (0 reasoning tokens, full budget to actual content; 3/3 repeat runs
+  covered all 9 requirements). Separately, the user pasted the exact current official
+  `recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B?variant=nvfp4` DGX-Spark command, settling this file's long-running
+  `--tool-call-parser` flip-flop (items 11/16/17/19/20): every flag matched the running config exactly,
+  including `qwen3_xml`, which was already in place — no change needed there, but it's now confirmed rather than
+  doc-derived. Full investigation, including an end-to-end real-Cline-CLI verification against a cloned
+  open-source repo, is in
+  `ai-workspace/summary-reports/qwen3.6-reasoning-token-budget-fix-2026-09-02.md`. Corrected stale
+  `qwen3_coder`-as-current-and-verified claims (superseded by the 2026-08-28 entry below, which this file itself
+  had not caught up to) in `CLAUDE.md`, `litellm-config.yaml`, `docs/models.md`, and `docs/architecture.md`.
+
 - **`docker-compose.qwen3.6.yml`: added `--mm-encoder-tp-mode data`, changed `--tool-call-parser qwen3_coder` →
   `qwen3_xml`, added `--reasoning-parser qwen3` (2026-08-28).** Three engine optimizations:
   - `--mm-encoder-tp-mode data`: Switches multi-modal encoder from weight-splitting tensor parallelism to

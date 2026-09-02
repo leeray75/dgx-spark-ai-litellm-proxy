@@ -151,7 +151,7 @@ All services connect via a Docker bridge network called `ai-bridge`:
 - **GPU Memory**: ~26GB weights (plus KV cache)
 - **Vision Support**: No (text-only)
 - **Reasoning**: Native thinking tokens with `--reasoning-parser qwen3`
-- **Special**: `--tool-call-parser qwen3_coder` (verified against real tool-calling 2026-08-27), `--load-format fastsafetensors`
+- **Special**: `--tool-call-parser qwen3_xml` (matches the official vLLM recipe, confirmed 2026-09-02), `--load-format fastsafetensors`, `--default-chat-template-kwargs '{"enable_thinking":false}'` (2026-09-02 — disables the reasoning pass by default so it can't consume the output token budget on long, multi-requirement tickets)
 
 ### nemotron-3-embed-1b-nvfp4 (Embedding)
 
