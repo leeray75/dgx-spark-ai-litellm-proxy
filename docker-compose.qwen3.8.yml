@@ -1,10 +1,29 @@
 # =============================================================================
-# docker-compose.qwen3.8.yml — Qwen3.8-27B-NVFP4 (Inferact, ModelOpt) on NVIDIA DGX Spark (GB10)
+# docker-compose.qwen3.8.yml — Qwen3.8-27B-NVFP4 (nvidia, ModelOpt) on NVIDIA DGX Spark (GB10)
 #
 # Main stack configuration. Includes full Langfuse/LiteLLM observability stack.
-# EXPERIMENTAL — docker-compose.qwen3.6.yml is the default/primary stack as of
-# 2026-08-24 (see CHANGELOG.md). This file is kept fully buildable as the
-# next-to-revisit option.
+# DEFAULT/PRIMARY STACK as of 2026-09-09 (explicit user decision — see the
+# CHECKPOINT SWAP note and RESULT section below for the accuracy-vs-throughput
+# trade this decision accepted, against NVIDIA's own published accuracy
+# benchmarks favoring this checkpoint by +3.2 to +16.1 points across
+# GPQA/AA-LCR/SciCode/IFBench).
+#
+# LIVE TEST RESULT (2026-09-09, 6-hour real usage window, 221 active samples):
+# median generation throughput 20.4 tok/s (mean 20.26 — mean/median nearly
+# identical, so this is steady sustained performance, not a number skewed by
+# a handful of bursts). This is the rigorous, real-usage number to use going
+# forward, not the single-request synthetic benchmarks in the RESULT section
+# below (24.3-24.9 tok/s) or qwen3.6's own ~83-84 tok/s synthetic figure.
+# qwen3.6's live-usage throughput is still only an informal recollection
+# (~40-45 tok/s, not a rigorously sampled measurement like this one) — an
+# equivalent 6-hour/sampled live measurement on qwen3.6 would be needed for a
+# fully apples-to-apples comparison. Taking that ~40-45 tok/s at face value,
+# qwen3.8's real-world throughput is roughly 2x slower (not the ~3.3x the
+# original synthetic-vs-synthetic comparison suggested, nor the ~1.6-1.8x
+# estimated from synthetic-qwen3.8-vs-live-qwen3.6). The user has accepted
+# this real, ~2x throughput cost for qwen3.8's benchmarked accuracy gains —
+# docker-compose.qwen3.6.yml remains kept fully buildable as the rollback
+# path regardless.
 #
 # Usage:
 #   docker compose -f docker-compose.qwen3.8.yml up -d
@@ -15,7 +34,159 @@
 # use case.
 #
 # =============================================================================
-# CHECKPOINT SWAP (2026-08-24): unsloth/Qwen3.8-27B-NVFP4 → Inferact/Qwen3.8-27B-NVFP4
+# CHECKPOINT SWAP (2026-09-09): Inferact/Qwen3.8-27B-NVFP4 → nvidia/Qwen3.8-27B-NVFP4
+# =============================================================================
+# The Inferact checkpoint is SUPERSEDED by this swap (its full RESULT/PROVENANCE
+# below is left in place as history, not deleted — same policy this file has
+# followed at every prior swap).
+#
+# WHY: nvidia/Qwen3.8-27B-NVFP4 is a genuinely new release (HF page states
+# 09/08/2026, i.e. one day before this swap), quantized by NVIDIA itself
+# (nvidia-modelopt v0.48.0 per the model card) with a DIFFERENT quantization
+# split than either checkpoint already tried: NVFP4 on MLP layers AND
+# `lm_head`, FP8 on self-attention/linear-attention layers. Worth a real boot
+# test rather than assuming the dense-architecture conclusion below still
+# holds for a third quantization recipe — but expectations are calibrated by
+# that conclusion, not reset by it.
+#
+# WHAT'S VERIFIED (config.json fetched directly from
+# https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4/raw/main/config.json,
+# README from the same repo):
+#   - architectures: ["Qwen3_5ForConditionalGeneration"], model_type "qwen3_5"
+#     — SAME architecture class, SAME dense (non-MoE) 27B model as both prior
+#     checkpoints. The REVISED CONCLUSION further below (dense vs. qwen3.6's
+#     MoE = ~9x more weight streamed per token, found empirically to be the
+#     real bottleneck, not kernel/quant choice) applies to this checkpoint
+#     too — nothing about it changes the model's activation pattern.
+#   - quantization_config schema is `config_groups` / `targets` /
+#     `quantized_layers` with `quant_algo` values "FP8" and "NVFP4" —
+#     this is the COMPRESSED-TENSORS library's schema shape, NOT NVIDIA
+#     ModelOpt's own schema (which the Inferact checkpoint had: flat
+#     `quant_method`/`quant_algo`/`producer` fields). The model card's
+#     "quantized with Model Optimizer" claim describes the toolchain that
+#     PRODUCED the checkpoint, not the on-disk schema vLLM has to parse —
+#     worth remembering if `--quantization modelopt` doesn't auto-detect
+#     correctly on first boot.
+#   - `lm_head` IS in the NVFP4-quantized target list (group_1, num_bits 4,
+#     group_size 16) — UNLIKE the Inferact checkpoint, which explicitly left
+#     `lm_head` unquantized specifically to avoid the bug class that crashed
+#     the retired Unsloth checkpoint under `--linear-backend marlin`
+#     ("'ParallelLMHead' object has no attribute 'output_size_per_partition'",
+#     Marlin's FP8 weight-prep path not handling a quantized lm_head layer).
+#     That was an FP8-quantized lm_head; this one is NVFP4-quantized — not
+#     confirmed to be the same failure mode, but close enough in shape that
+#     forcing Marlin on the FIRST boot of this checkpoint is not being done
+#     here. Native kernel selection (vLLM's default) is used instead, same
+#     as this file's own first attempt with Inferact before Marlin was tried
+#     as a follow-up test.
+#
+# FLAG CHANGES vs. the Inferact command this replaces:
+#   - `--quantization modelopt` REMOVED. The official model card's own vLLM
+#     sample command (both vLLM and SGLang variants) does NOT pass a
+#     `--quantization` flag at all — relies on auto-detection from the
+#     checkpoint's compressed-tensors-shaped config, same as this project's
+#     retired Unsloth checkpoint did. Being explicit here would assert a
+#     scheme (modelopt) that doesn't match what's actually on disk.
+#   - `--linear-backend marlin` REMOVED for this first boot — see lm_head
+#     caution above. Try adding it back only as an explicit follow-up test,
+#     the same two-step process already used for the Inferact checkpoint.
+#   - `--kv-cache-dtype fp8` → `fp8_e4m3` (explicit, matching the official
+#     command's exact value rather than vLLM's auto-resolved default).
+#   - `--mm-encoder-tp-mode data` ADDED — present in the official command,
+#     absent from the Inferact config; qwen3.6's file already uses this same
+#     flag for its own vision encoder, so this brings qwen3.8 in line.
+#   - `--seed 0` ADDED — present in the official command, harmless, aids
+#     reproducibility between test runs.
+#   - `--tensor-parallel-size` LEFT AT 1 despite the official command
+#     specifying 4: that recipe's "Test Hardware" is NVIDIA Grace Blackwell
+#     GB300 (multi-GPU datacenter), not this single-GPU GB10 Superchip.
+#     Same category of mismatch as the Inferact checkpoint's RTX-5090 recipe
+#     numbers not translating to this hardware — noted so it isn't mistaken
+#     for an oversight.
+#   - `--gpu-memory-utilization` LEFT AT 0.6, `--max-num-seqs` AT 4,
+#     `--max-num-batched-tokens` AT 8192 — NOT the official 0.85/32/32768.
+#     This is a deliberate hardware-informed choice, not caution for its own
+#     sake: this exact GB10 box, running this exact observability stack, has
+#     DOCUMENTED history of 0.85 causing real problems — qwen3.6's own
+#     corrections item 9 found 0.85 × 121.7GB ≈ 103GB reserved, with ~7GB of
+#     actual swap. GB300 (the official recipe's target) is a different memory
+#     tier, not a bigger version of the same box. 0.6/4/8192 is the value
+#     already proven safe on this hardware for THIS SAME dense-27B
+#     architecture family (the Inferact checkpoint, RESULT section above,
+#     measured 24.74-29.32 GiB of real KV cache headroom at 0.6 with no
+#     OOM). Starting from a known-safe point on real hardware beats starting
+#     from a datacenter recipe's numbers and hoping. Re-verify actual KV
+#     cache size in the boot log regardless — raising these is a legitimate
+#     follow-up if there's real headroom to spare once this boots.
+#   - `VLLM_NVFP4_GEMM_BACKEND=marlin` env var REMOVED — already confirmed a
+#     no-op for this project's compressed-tensors-schema checkpoints (see the
+#     archived Unsloth corrections item 2 below: "compressed-tensors NVFP4
+#     auto-selected FlashInferCutlassNvFp4LinearKernel... no Marlin fallback
+#     needed"), and this checkpoint shares that same schema shape.
+#
+# RESULT (tested 2026-09-09, real boot on this hardware): clean boot, no
+# crash — the lm_head-is-NVFP4-quantized caution above did NOT materialize
+# as a problem on the native kernel path (no Marlin forced). Kernel selection
+# confirmed via log: "Selected FlashInferFP8ScaledMMLinearKernel for
+# ModelOptFp8LinearMethod" (FP8 attention layers) and "Using
+# FlashInferCutlassNvFp4LinearKernel for NVFP4 GEMM" (MLP+lm_head) — both
+# native, same as the Inferact checkpoint's native-kernel run, no Marlin
+# fallback attempted or needed. KV cache: 26.48 GiB / 746,890 tokens / 2.85x
+# concurrency at --gpu-memory-utilization 0.6 — in the same range as
+# Inferact's native-path run (24.74 GiB), confirming 0.6 remains a safe
+# starting value for this architecture family on this hardware. Boot itself
+# was fast (174s total init, most of it a 3-pass/~45s fp8_gemm autotune, NOT
+# the historical 10-35 min cold-cache phase) — worth noting for future
+# reference but not yet understood why this was so much faster than prior
+# first-boots on a new checkpoint. One warning logged: "No tuned config
+# covers fp4_gemm input_shapes=...; falling back to runner=CutlassFp4GemmRunner
+# tactic=-1" for one specific batch shape — a perf-cliff warning, not a
+# correctness issue; did not prevent a real measurement below.
+#
+# REAL THROUGHPUT (direct engine, localhost:8301, temperature 0.0, 700-token
+# completions, two independent runs on different prompts):
+#   Run 1: 700 tokens in 28.07s = 24.94 tok/s
+#   Run 2: 700 tokens in 28.85s = 24.27 tok/s
+# GPU trace during generation: 96% utilization, ~37-38W power draw — the
+# SAME "busy but power-starved" signature both the Inferact (~34W) and
+# retired Unsloth (~34W) checkpoints showed, confirming this checkpoint is
+# still memory-bandwidth-bound (dense 27B streaming all weights every token)
+# rather than compute-bound, same root cause as both prior attempts. This is
+# a real ~35-40% improvement over Inferact's 17.5-18.5 tok/s (likely the
+# NVFP4-quantized lm_head and MLP layers streaming fewer bytes than
+# Inferact's larger unquantized-lm_head footprint).
+#
+# IMPORTANT CORRECTION to the comparison baseline: qwen3.6's documented
+# ~83-84 tok/s (CLAUDE.md, this file's own earlier notes) is a clean
+# synthetic single-request benchmark, the same kind of measurement used
+# above for qwen3.8 — NOT representative of qwen3.6's throughput under real
+# usage. The user reports qwen3.6 typically runs ~40-45 tok/s live. Against
+# that real-world number, qwen3.8's 24.3-24.9 tok/s is only ~1.6-1.8x
+# slower, not ~3.3x — a materially smaller gap, though neither number was
+# a rigorous measurement at the time this was written.
+#
+# LIVE TEST RESULT (2026-09-09, see top of file for the full note): a real
+# 6-hour/221-sample live measurement came back at 20.4 tok/s median (20.26
+# mean) — steady, sustained, not bursty. That's roughly 2x slower than
+# qwen3.6's still-informal ~40-45 tok/s live estimate — a real, measured
+# cost, not the smaller 1.6-1.8x gap this section originally estimated.
+#
+# DECISION (2026-09-09): given NVIDIA's own published accuracy benchmarks
+# show qwen3.8 ahead of qwen3.6 on every overlapping metric (GPQA Diamond
+# +3.2, AA-LCR +11.4, SciCode +7.8, IFBench +16.1 — see docs/models.md or
+# CLAUDE.md for the full comparison), the user made an explicit call to
+# accept the throughput trade: qwen3.8 (this checkpoint) is now the
+# DEFAULT/PRIMARY stack (see CLAUDE.md, scripts/restart.sh,
+# scripts/model-switch.sh, litellm-config.yaml). The live test confirmed a
+# real ~2x throughput cost rather than the smaller gap first estimated, but
+# the decision stands — qwen3.8's benchmarked accuracy gains were judged
+# worth it. docker-compose.qwen3.6.yml remains fully buildable as the
+# rollback path if that changes.
+#
+# Source (checkpoint): https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4
+#
+# =============================================================================
+# ARCHIVED — CHECKPOINT SWAP (2026-08-24): unsloth/Qwen3.8-27B-NVFP4 → Inferact/Qwen3.8-27B-NVFP4
 # =============================================================================
 # The Unsloth checkpoint (compressed-tensors NVFP4+FP8) is RETIRED from this
 # file as of this swap — its full PROVENANCE/CORRECTIONS HISTORY is preserved
@@ -682,13 +853,10 @@ services:
       FLASHINFER_DISABLE_VERSION_CHECK: "1"
       CUTE_DSL_ARCH: sm_121a                # GB10 Blackwell SM architecture — hardware fact, model-independent
       VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
-      # CONFIRMED NO-OP for this checkpoint (tested 2026-08-26, twice — with
-      # and without --linear-backend marlin below): kernel selection is
-      # controlled by --linear-backend, not this legacy env var, on this
-      # vLLM build. Left set anyway — harmless, and --linear-backend marlin
-      # is the flag actually doing the work now (see RESULT/FOLLOW-UP TEST
-      # in the file header).
-      VLLM_NVFP4_GEMM_BACKEND: marlin
+      # REMOVED for the nvidia/Qwen3.8-27B-NVFP4 swap (2026-09-09) — confirmed
+      # no-op for compressed-tensors-schema checkpoints (this one included,
+      # see the CHECKPOINT SWAP note at the top of this file), and no
+      # --linear-backend flag is set below either for this first boot.
       # ESCAPE HATCH (leave commented): if generation output looks wrong
       # after a FlashInfer autotune cache load on a newer nightly, uncomment
       # to disable the persistent cache and report upstream.
@@ -716,56 +884,100 @@ services:
       retries: 120
       start_period: 3600s
     # ---------------------------------------------------------------------------
-    # --quantization modelopt: explicit, matching qwen3.6's style (this
-    # checkpoint's compressed weights auto-detect too, but being explicit
-    # matches this project's convention for the proven-good scheme).
+    # This command is BASED ON https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4's
+    # own documented vLLM sample command, with hardware-informed deviations
+    # for THIS box (NVIDIA DGX Spark / GB10, not the card's GB300 test
+    # hardware) rather than a literal copy — see the CHECKPOINT SWAP note at
+    # the top of this file for the full reasoning:
     #
-    # --tool-call-parser qwen3_coder: the vLLM recipe's explicit recommendation
-    # for THIS checkpoint (recipes.vllm.ai/Qwen/Qwen3.8-27B) — different from
-    # qwen3_xml, which was only ever an analogy-based guess for the retired
-    # Unsloth checkpoint. Still UNVERIFIED against a real Cline/Claude Code
-    # tool-calling session — see PROVENANCE section at top of file.
+    # --tensor-parallel-size: official says 4 (multi-GPU GB300). This is a
+    # single-GPU GB10 Superchip — TP=4 is impossible here, not a style choice.
+    # Left at 1, the only value this hardware supports.
     #
-    # --speculative-config: num_speculative_tokens defaults to 3, matching the
-    # vLLM recipe's recommendation for this checkpoint (the retired Unsloth
-    # checkpoint used 2, per its own docs). QWEN38_NUM_SPECULATIVE_TOKENS
-    # (.env) is an A/B toggle, same pattern as qwen3.6's
-    # QWEN36_NUM_SPECULATIVE_TOKENS — no "moe_backend" key here, dense model.
+    # --gpu-memory-utilization / --max-num-seqs / --max-num-batched-tokens:
+    # official says 0.85 / 32 / 32768 (a GB300 datacenter memory budget).
+    # Set instead to 0.6 / 4 / 8192 — the values this file's own history
+    # already proved safe on THIS exact GB10 box, for this same dense-27B
+    # architecture family, alongside the full observability stack (see the
+    # CHECKPOINT SWAP note: qwen3.6's corrections item 9 found 0.85 causes
+    # real swap on this hardware; the Inferact checkpoint's RESULT section
+    # confirms 0.6 gives 24-29 GiB of real KV cache headroom with no OOM).
+    # Re-verify actual KV cache size in the boot log regardless; raising these
+    # is a legitimate follow-up once real headroom is confirmed.
     #
-    # --override-generation-config: kept at the retired Unsloth checkpoint's
-    # "Thinking Mode" defaults (temperature 1.0) as a reasonable carry-over —
-    # NOT yet verified against any Inferact-specific documented sampling
-    # defaults (none found during this swap's research). Revisit if output
-    # quality looks off.
+    # No --quantization flag: the official command doesn't pass one either
+    # (auto-detects from the checkpoint's compressed-tensors-shaped config —
+    # see the CHECKPOINT SWAP note at the top of this file for why an
+    # explicit `modelopt` value would be wrong here despite the model card's
+    # "quantized with Model Optimizer" framing).
+    #
+    # No --linear-backend marlin: not in the official command, and not forced
+    # on this first boot given the lm_head-is-NVFP4-quantized caution in the
+    # CHECKPOINT SWAP note above. Native kernel selection first; Marlin is a
+    # follow-up test, same two-step process already used for Inferact.
+    #
+    # SIMPLIFICATION PASS (2026-09-09, following an OpenCode behavior report of
+    # excessive self-verification on qwen3.8 — 26 tool-call steps on one
+    # subtask vs. 7-13 on others in the same run): dropped
+    # --override-generation-config (was forcing temperature 1.0, carried by
+    # analogy from the RETIRED Unsloth checkpoint's "Thinking Mode" docs,
+    # never validated against this checkpoint or against agentic tool-use;
+    # qwen3.6 runs at 0.6 by comparison) and --default-chat-template-kwargs
+    # (was only setting preserve_thinking:true — a minor multi-turn behavior,
+    # not what actually controls whether thinking happens). Removing these
+    # lets the model's own generation_config.json and chat template defaults
+    # apply, matching NVIDIA's official sample command (which sets neither).
+    # This is the primary suspected fix for the over-verification report —
+    # not yet re-tested as of this edit. Also dropped as pure unneeded cruft,
+    # not in the official command and not tied to any known incident:
+    # --load-format fastsafetensors (only affects boot speed), --attention-backend
+    # flashinfer (vLLM auto-selects; confirmed via boot log every time so far),
+    # --async-scheduling and --enable-prefix-caching (throughput-only
+    # optimizations), --uvicorn-log-level warning (cosmetic).
+    #
+    # DELIBERATELY KEPT despite being absent from the official command —
+    # each tied to a real incident or a real correctness/throughput need, and
+    # the recipe's silence on them isn't evidence they're unnecessary here:
+    #   - --trust-remote-code: every boot of this checkpoint family (all
+    #     three tried) has included it; Qwen3_5ForConditionalGeneration is
+    #     custom enough that dropping this untested risks the model failing
+    #     to load at all on the production default engine.
+    #   - --mamba-ssm-cache-dtype float32: added elsewhere in this project
+    #     after a real vLLM runtime warning about GDN/SSM layer stability for
+    #     this exact architecture family — dropping it blindly reintroduces a
+    #     previously-fixed issue for no established benefit.
+    #   - --speculative-config (MTP): the official command omits it, but
+    #     dropping it doesn't address the over-verification report (that's a
+    #     planning/sampling behavior, not a decoding-acceleration one) — it
+    #     would only remove real throughput headroom already under pressure.
+    #   - --gpu-memory-utilization 0.6 / --max-num-seqs 4 /
+    #     --max-num-batched-tokens 8192 (not the official 0.85/32/32768):
+    #     see the CHECKPOINT SWAP note above — 0.85 caused documented real
+    #     swap on this exact box (qwen3.6 corrections item 9).
+    #
+    # QWEN38_NUM_SPECULATIVE_TOKENS mirrors qwen3.6's own A/B-toggle env var.
     # ---------------------------------------------------------------------------
     command: >
-      Inferact/Qwen3.8-27B-NVFP4
+      nvidia/Qwen3.8-27B-NVFP4
       --served-model-name qwen3.8-27b
       --host 0.0.0.0
       --port 8000
       --dtype auto
-      --quantization modelopt
-      --kv-cache-dtype fp8
+      --kv-cache-dtype fp8_e4m3
       --tensor-parallel-size 1
       --gpu-memory-utilization 0.6
       --max-model-len 262144
       --max-num-seqs 4
       --enable-chunked-prefill
-      --async-scheduling
       --max-num-batched-tokens 8192
-      --load-format fastsafetensors
       --mamba-ssm-cache-dtype float32
-      --attention-backend flashinfer
-      --linear-backend marlin
-      --uvicorn-log-level warning
       --trust-remote-code
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
       --reasoning-parser qwen3
-      --enable-prefix-caching
+      --mm-encoder-tp-mode data
+      --seed 0
       --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN38_NUM_SPECULATIVE_TOKENS:-3}}'
-      --default-chat-template-kwargs '{"preserve_thinking":true}'
-      --override-generation-config '{"temperature":1.0,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------

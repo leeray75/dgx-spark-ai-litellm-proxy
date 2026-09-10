@@ -17,8 +17,8 @@ The initial model loading can take 10-60 minutes (first boot includes FlashInfer
 
 ```bash
 # Check container logs
-docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (default)
-docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (experimental)
+docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (default)
+docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (rollback)
 docker compose logs -f nemotron-embed-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine
@@ -59,7 +59,7 @@ docker compose logs litellm
 
 3. Verify the vLLM engine is healthy:
 ```bash
-curl http://localhost:8301/health  # Qwen3.6 (default) or Qwen3.8 (experimental) — whichever stack is running
+curl http://localhost:8301/health  # Qwen3.8 (default) or Qwen3.6 (rollback) — whichever stack is running
 curl http://localhost:8302/health  # For Embedding Engine (Qwen3.8/3.6 stacks)
 curl http://localhost:8300/health  # For Qwen3-Coder
 curl http://localhost:8200/health  # For Nemotron
@@ -368,8 +368,8 @@ grep LANGFUSE_SECRET_KEY .env
 docker compose logs -f
 
 # Specific service
-docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (default)
-docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (experimental)
+docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (default)
+docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (rollback)
 docker compose logs -f nemotron-embed-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine

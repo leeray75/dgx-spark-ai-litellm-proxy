@@ -6,6 +6,69 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Qwen3.8 is the default/primary model again, Qwen3.6 is now the rollback** (2026-09-09, reverting the
+  2026-08-24 fallback to qwen3.6 — explicit user decision). Driven by two findings from the same-day checkpoint
+  swap `Inferact/Qwen3.8-27B-NVFP4` → `nvidia/Qwen3.8-27B-NVFP4` (see `docker-compose.qwen3.8.yml`'s CHECKPOINT
+  SWAP/RESULT sections): (1) NVIDIA's own published accuracy benchmarks show qwen3.8 ahead of qwen3.6 on every
+  overlapping metric — GPQA Diamond +3.2 (88.01 vs 84.8), AA-LCR +11.4 (73.38 vs 62.0), SciCode +7.8 (48.41 vs
+  40.6), IFBench +16.1 (78.93 vs 62.8); (2) the real-world throughput gap is narrower than the 2026-08-24 decision
+  assumed — the new checkpoint measures ~24.3-24.9 tok/s (direct engine, two independent 700-token runs), a real
+  ~35-40% improvement over the retired Inferact checkpoint's ~17.5-18.5 tok/s, and qwen3.6's oft-cited ~83-84
+  tok/s turns out to be a clean synthetic single-request number rather than representative of live usage — the
+  user reports qwen3.6 typically runs ~40-45 tok/s live, making the actual gap ~1.6-1.8x, not ~3.3x. This is an
+  explicit, deliberate trade the user chose to accept (accuracy over raw speed), **not a proven win** — a real
+  head-to-head live test (same prompts/harness, both engines) is still pending. Flipped default/rollback labeling
+  across `README.md`, `CLAUDE.md`, all of `docs/*.md`, `scripts/restart.sh` and `model-switch.sh` (no-arg default
+  now starts qwen3.8), and `litellm-config.yaml` (`default_fallbacks` back to `qwen3.8-27b`, model_list
+  reordered). `docker-compose.qwen3.6.yml` is unchanged and still fully buildable — nothing about qwen3.6 was
+  removed, only which one starts by default.
+  - Also added a new Accuracy Benchmarks table (GPQA Diamond/AA-LCR/SciCode/IFBench) to `docs/models.md`, and
+    updated all throughput figures there and in `docker-compose.qwen3.8.yml`'s Configuration Comparison example
+    to the new measured values.
+  - **Addendum (same day): the real head-to-head live test noted above as "still pending" is now DONE.** A
+    6-hour window sampled 221 active generation requests on `qwen3-8-27b-nvfp4-engine` and measured a sustained
+    **20.4 tok/s median (20.26 mean)** — mean and median nearly identical, so this is steady real-usage
+    throughput, not a number skewed by bursts. Against qwen3.6's own informal live estimate (~40-45 tok/s, not
+    yet measured with the same rigor), qwen3.8 is roughly **~2x slower** under real live conditions — a larger,
+    more clear-cut gap than the ~1.6-1.8x this entry originally estimated (that estimate mismatched a synthetic
+    qwen3.8 number against a live qwen3.6 number). The throughput cost is real and now confirmed, not just
+    narrower-than-feared; the user is sticking with the accuracy-over-speed call regardless. qwen3.8 remains the
+    default. Updated `docs/agents.md` and `docs/models.md` (all "still pending" language for this comparison) to
+    reflect the completed test; `CLAUDE.md`, `docker-compose.qwen3.8.yml`, `docker-compose.qwen3.6.yml`, and
+    `litellm-config.yaml` were updated separately with this same result.
+
+- **`docker-compose.qwen3.8.yml`: SIMPLIFICATION PASS — dropped `--override-generation-config` and
+  `--default-chat-template-kwargs` (2026-09-09/10).** Prompted by a real OpenCode behavior report: one subtask
+  ("add plain CSS styling, keep it simple") took 26 internal tool-call steps and 22m10s, vs. 7-13 steps and
+  3-11 minutes for every other subtask in the same 10-subtask run — the model built a from-scratch jsdom test
+  harness, round-tripped an `npm install`/`uninstall` with md5sum verification of `package.json`, and ran a
+  bespoke CSS-property checker script four times, none of it requested. Suspected cause: `temperature: 1.0`
+  (vs. qwen3.6's `0.6`) combined with `enable_thinking` on by default (vs. qwen3.6's explicit
+  `enable_thinking:false`) — both carried over without being deliberately chosen for agentic behavior.
+  **Correction after testing:** removing `--override-generation-config` did NOT change actual sampling —
+  `nvidia/Qwen3.8-27B-NVFP4`'s own shipped `generation_config.json` specifies `temperature: 1.0, top_k: 20,
+  top_p: 0.95`, identical to what was removed, so temperature 1.0 turns out to be NVIDIA's genuine intended
+  default for this checkpoint, not an unverified carry-over. `enable_thinking` was never explicitly set for
+  qwen3.8 either way, so its default-on behavior (and the small-`max_tokens`-returns-empty-response risk that
+  comes with it) is unchanged — reconfirmed via direct retest post-change. **Net effect: the over-verification
+  report is neither fixed nor tested as fixed by this pass** — it only ruled out "unnecessary config cruft" as
+  the explanation. Also dropped (no known incident, matches the official model card's command): `--load-format
+  fastsafetensors`, `--attention-backend flashinfer`, `--async-scheduling`, `--enable-prefix-caching`,
+  `--uvicorn-log-level warning`. Kept despite being absent from the official command: `--trust-remote-code`,
+  `--mamba-ssm-cache-dtype float32`, `--speculative-config` (MTP), and the GB10-safe `0.6`/`4`/`8192` memory
+  values (not the official recipe's GB300-scaled `0.85`/`32`/`32768` — this box's own history shows 0.85 causes
+  real swap). Unexpected side effect: KV cache headroom nearly doubled (746,890 → 1,309,255 tokens, 2.85x →
+  4.99x concurrency) at the same `--gpu-memory-utilization 0.6`. Post-pass live measurement (421 samples): 22.8
+  tok/s median (26.41 mean, mean now above median) — a real ~12% median improvement over the pre-pass 20.4
+  tok/s, most likely explained by the extra concurrency headroom rather than any sampling change. Updated
+  `CLAUDE.md`, `litellm-config.yaml`, and `docs/models.md` with the same result.
+
+- **`litellm-config.yaml`: `request_timeout` raised 600 → 1500 (2026-09-09).** The calling OpenCode harness
+  enforces its own 1200s ceiling per agentic turn, and the subtask above ran 22m10s (1330s) — longer than the
+  old 600s value — without (per the report) being killed by our proxy first. Unclear whether `request_timeout`
+  is enforced as a hard wall-clock cap on streaming responses in this LiteLLM build, but 600 < 1200 was a
+  latent mismatch regardless; 1500 gives real headroom above the harness's own ceiling.
+
 - **`docker-compose.qwen3.6.yml`: added `"enable_thinking":false` to `--default-chat-template-kwargs`, confirmed
   `--tool-call-parser qwen3_xml` against a freshly-pasted official recipe (2026-09-02).** Root cause of a real
   user-reported symptom — "long tickets with many requirements, some tasks never get implemented" — was found to

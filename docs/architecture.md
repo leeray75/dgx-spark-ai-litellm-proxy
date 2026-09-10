@@ -75,8 +75,8 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 
 | Service | Image | Port | Model | Quantization |
 |---------|-------|------|-------|--------------|
-| Qwen3.8 Engine (experimental) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.8-27B-NVFP4 | NVFP4+FP8 (compressed-tensors) |
-| Qwen3.6 Engine (default) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 (ModelOpt) |
+| Qwen3.8 Engine (default) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.8-27B-NVFP4 | NVFP4+FP8 (compressed-tensors) |
+| Qwen3.6 Engine (rollback) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 (ModelOpt) |
 | Embedding Engine | `vllm/vllm-openai:nightly` | 8302 | nemotron-3-embed-1b-nvfp4 | NVFP4 |
 | Qwen3-Coder Engine | `vllm/vllm-openai:v0.19.1-cu130` | 8300 | Qwen3-Coder-Next-FP8 | FP8 |
 | Nemotron Engine | `vllm/vllm-openai:v0.18.1-cu130` | 8200 | Nemotron-3-Super-120B | NVFP4 |
@@ -105,7 +105,7 @@ All services connect via a Docker bridge network called `ai-bridge`:
 |------|---------|---------------|---------|
 | 3000 | Langfuse Web | External | Web UI, API |
 | 4000 | LiteLLM | External | OpenAI-compatible API |
-| 8301 | Qwen3.6 Engine (default) / Qwen3.8 Engine (experimental) | External | Direct vLLM access — mutually exclusive, whichever stack is running |
+| 8301 | Qwen3.8 Engine (default) / Qwen3.6 Engine (rollback) | External | Direct vLLM access — mutually exclusive, whichever stack is running |
 | 8302 | Embedding Engine | External | Direct vLLM access (embeddings) |
 | 8300 | Qwen3-Coder Engine | External | Direct vLLM access (Qwen3-Coder) |
 | 8200 | Nemotron Engine | External | Direct vLLM access |
@@ -129,20 +129,28 @@ All services connect via a Docker bridge network called `ai-bridge`:
 
 ## Model Details
 
-### Qwen3.8-27B-NVFP4 (EXPERIMENTAL — see throughput note in Model Comparison below)
+### Qwen3.8-27B-NVFP4 (DEFAULT — see throughput/accuracy note in Model Comparison below)
 
 - **Size**: 27B total parameters, dense (not MoE — all params active)
 - **Architecture**: Hybrid Gated-DeltaNet + Gated-Attention, with vision encoder
-- **Quantization**: compressed-tensors NVFP4 + FP8 (mixed)
+- **Quantization**: compressed-tensors-shaped NVFP4 (MLP + `lm_head`) / FP8 (attention) mixed scheme, auto-detected
+  (no `--quantization` flag needed — despite the model card's "quantized with Model Optimizer" framing, the
+  on-disk schema is compressed-tensors' `config_groups`/`targets`, not ModelOpt's own schema)
 - **Context**: 262K tokens native
-- **GPU Memory**: ~22.13GB weights confirmed via boot log (plus KV cache; `--gpu-memory-utilization 0.6`)
-- **Vision Support**: Yes
-- **Reasoning**: Native thinking tokens with `--reasoning-parser qwen3`
-- **Special**: `--tool-call-parser qwen3_xml` (carried over from qwen3.6 by analogy, unverified for this
-  model), `--load-format fastsafetensors`, no `--quantization`/`--moe-backend` flags needed (dense,
-  auto-detected quantization). See `docker-compose.qwen3.8.yml`'s PROVENANCE header for full detail.
+- **GPU Memory**: KV cache 1,309,255 tokens / 4.99x concurrency at `--gpu-memory-utilization 0.6` (post
+  simplification-pass, 2026-09-10)
+- **Vision Support**: Yes (`--mm-encoder-tp-mode data`)
+- **Reasoning**: Native thinking tokens with `--reasoning-parser qwen3`; `enable_thinking` is on by default
+  (never explicitly set) — a small `max_tokens` can return an empty response, all tokens spent on reasoning
+- **Special**: `--tool-call-parser qwen3_coder` (matches the official model card recipe — **not** `qwen3_xml`,
+  which was only ever a carried-over guess during an earlier, now-retired checkpoint), `--trust-remote-code`,
+  `--mamba-ssm-cache-dtype float32`, `--speculative-config` (MTP). No `--load-format fastsafetensors`,
+  `--attention-backend`, `--async-scheduling`, `--enable-prefix-caching`, or `--override-generation-config` /
+  `--default-chat-template-kwargs` — dropped 2026-09-09/10 as unneeded cruft (the sampling-related pair was
+  confirmed to be a no-op: the checkpoint's own `generation_config.json` already ships the same values). See
+  `docker-compose.qwen3.8.yml`'s CHECKPOINT SWAP/RESULT/SIMPLIFICATION PASS notes for full detail.
 
-### Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
+### Qwen3.6-35B-A3B-NVFP4 (ROLLBACK)
 
 - **Size**: 35B total parameters, 3B active (MoE)
 - **Architecture**: Hybrid Attention + MoE

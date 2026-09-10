@@ -4,19 +4,19 @@ This guide compares the supported LLMs for the **NVIDIA DGX Spark (Blackwell GB1
 
 ## Model Overview
 
-### Qwen3.8-27B-NVFP4 (EXPERIMENTAL — NOT recommended, see throughput note below)
+### Qwen3.8-27B-NVFP4 (DEFAULT — see throughput/accuracy note below)
 
 | Attribute | Value |
 |-----------|-------|
 | **Model Name** | Qwen3.8-27B-NVFP4 |
-| **Provider** | Inferact (swapped from Unsloth 2026-08-26 — see CHANGELOG.md) |
+| **Provider** | NVIDIA (checkpoint swapped from Inferact 2026-09-09 — see CHANGELOG.md) |
 | **Total Parameters** | 27B (dense — not MoE) |
 | **Active Parameters** | 27B (all) |
 | **Architecture** | Hybrid Gated-DeltaNet + Gated-Attention, with vision encoder |
-| **Quantization** | NVIDIA ModelOpt NVFP4 (W4A4, group size 16); `lm_head` NOT quantized |
+| **Quantization** | NVIDIA ModelOpt (nvidia-modelopt v0.48.0), compressed-tensors schema — NVFP4 on MLP + `lm_head`, FP8 on attention/linear-attention layers |
 | **Context Window** | 262K tokens native |
-| **VRAM Required** | ~24.97 GiB weights (confirmed via boot log) |
-| **Model ID** | `Inferact/Qwen3.8-27B-NVFP4` |
+| **VRAM Required** | ~22-25 GiB weights (varies by checkpoint tested; see `docker-compose.qwen3.8.yml` for exact boot-log figures) |
+| **Model ID** | `nvidia/Qwen3.8-27B-NVFP4` |
 | **vLLM Image** | `vllm/vllm-openai:nightly` |
 | **Port** | 8301 |
 
@@ -32,23 +32,45 @@ This guide compares the supported LLMs for the **NVIDIA DGX Spark (Blackwell GB1
   **not independently verified** against a real Cline/Claude Code tool-calling session
 - **Speculative Decoding**: MTP support, `num_speculative_tokens=3` (matches the vLLM recipe's recommendation)
 
-#### Throughput — NOT RECOMMENDED
+#### Throughput — real live test confirms the trade (see Accuracy Benchmarks below)
 
-Real measured throughput: **~17.5 tok/s** (700 tokens in 39.95s), with 96% GPU utilization but only ~34W power
-draw — the same low-power-despite-busy signature the previously-tried Unsloth checkpoint showed at ~20 tok/s.
-Both Qwen3.8 checkpoints tried so far land in the same slow class; **qwen3.6 (~83.7 tok/s) is the only proven-fast
-option and remains the default.** Full investigation (including the retired Unsloth checkpoint's own crash
-history) is in `docker-compose.qwen3.8.yml`'s header.
+**Real live-usage result (the head-to-head test that was pending): 20.4 tok/s median, 20.26 tok/s mean**, sampled
+over a 6-hour window with 221 active generation samples on `nvidia/Qwen3.8-27B-NVFP4`
+(`qwen3-8-27b-nvfp4-engine`). Mean and median are nearly identical, so this is steady sustained throughput under
+real usage, not a number skewed by bursts.
+
+For reference, the earlier synthetic single-request benchmark (direct engine, two independent 700-token runs)
+measured **~24.3-24.9 tok/s** (28.07-28.85s per run, 96% GPU utilization, ~37-38W power draw) — a real ~35-40%
+improvement over the retired Inferact checkpoint's ~17.5-18.5 tok/s at the time, but that number is not what
+callers actually see under real usage; the 20.4 tok/s live median above is. Still memory-bandwidth-bound (dense
+27B streaming all weights every token) rather than compute-bound, the same root cause every Qwen3.8 checkpoint
+tried so far has shown.
+
+qwen3.6's oft-cited **~83-84 tok/s** is a clean synthetic single-request benchmark number, not representative of
+live usage — the user reports qwen3.6 typically runs **~40-45 tok/s** under real/live conditions (informal
+estimate, not yet measured with the same 6-hour/sampled rigor as qwen3.8's number above). Taking that at face
+value, qwen3.8 is roughly **~2x slower** under real live conditions — not the ~1.6-1.8x or ~3.3x estimates floating
+around in earlier notes (those compared mismatched synthetic-vs-live or synthetic-vs-synthetic numbers). This
+real head-to-head live test is now DONE, not pending. Full investigation (including both retired checkpoints'
+crash/throughput history) is in `docker-compose.qwen3.8.yml`'s header.
 
 #### Use Cases
 
-- Not currently recommended for real work — kept as an experimental option pending a vLLM build with better
-  SM121 kernel support for NVFP4 on this architecture family
-- Vision-assisted coding tasks, if/when the throughput issue is resolved
+- **Primary/default stack as of 2026-09-09** — NVIDIA's own published accuracy benchmarks favor this checkpoint
+  over qwen3.6 on every overlapping metric (see Accuracy Benchmarks below); the throughput cost is an explicit,
+  deliberate trade the user chose to accept. The real 6-hour live test now confirms that cost is a genuine ~2x,
+  not the narrower ~1.6-1.8x earlier synthetic-vs-live comparisons suggested — the user is sticking with the
+  accuracy-over-speed call regardless
+- Vision-assisted coding tasks (screenshots, diagrams) — the only stack of the two with a vision encoder
+- Coding tasks with Cline/Claude Code where the accuracy gain matters more than raw tok/s
 
 ---
 
-### Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
+### Qwen3.6-35B-A3B-NVFP4 (ROLLBACK)
+
+**Rollback stack as of 2026-09-09** — kept fully buildable and unmodified as the known-good fallback if the
+now-confirmed ~2x throughput cost (see Qwen3.8's Throughput section above) stops being worth the accuracy gain in
+practice (see `docker-compose.qwen3.6.yml`'s header and CHANGELOG.md).
 
 | Attribute | Value |
 |-----------|-------|
@@ -198,15 +220,35 @@ history) is in `docker-compose.qwen3.8.yml`'s header.
 | **Quantization** | NVFP4+FP8 (compressed-tensors) | NVFP4 (ModelOpt) | FP8 | NVFP4 | NVFP4 |
 | **Output Format** | Standard JSON | Standard JSON | Standard JSON | Reasoning blocks | 2048-dim vector |
 | **Vision** | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No |
-| **Tool Calling** | Native (qwen3_xml, unverified) | Native (qwen3_xml) | Native (qwen3_coder) | Requires parser | N/A |
-| **Best For** | Coding (rollback) | Coding (Cline/Claude Code), default | Coding tasks | General reasoning | Embeddings/RAG |
+| **Tool Calling** | Native (qwen3_coder, unverified) | Native (qwen3_xml) | Native (qwen3_coder) | Requires parser | N/A |
+| **Best For** | Coding (Cline/Claude Code), default | Coding (rollback) | Coding tasks | General reasoning | Embeddings/RAG |
 | **Runs Concurrently** | ❌ | ❌ | ❌ | ❌ | ✅ Yes |
+
+---
+
+## Accuracy Benchmarks (NVIDIA-published, NVFP4-quantized)
+
+NVIDIA's own published benchmarks for each model's NVFP4-quantized checkpoint (from each model's HF model card)
+show qwen3.8 ahead of qwen3.6 on every overlapping metric:
+
+| Benchmark | Qwen3.6-35B-A3B-NVFP4 | Qwen3.8-27B-NVFP4 | Δ (qwen3.8 − qwen3.6) |
+|-----------|----------------------|-------------------|------------------------|
+| GPQA Diamond | 84.8 | 88.01 | +3.2 |
+| AA-LCR | 62.0 | 73.38 | +11.4 |
+| SciCode | 40.6 | 48.41 | +7.8 |
+| IFBench | 62.8 | 78.93 | +16.1 |
+
+This is the basis for the 2026-09-09 decision to make qwen3.8 the default/primary stack — trading throughput for
+meaningfully better accuracy. A real 6-hour/221-sample live test has since confirmed that trade: qwen3.8 sustains
+20.4 tok/s median (20.26 mean) under real usage, vs. qwen3.6's informal ~40-45 tok/s live estimate — roughly ~2x
+slower, a real cost the user has chosen to accept (quality over raw speed). See `docker-compose.qwen3.8.yml`'s
+RESULT section and CHANGELOG.md for the full reasoning.
 
 ---
 
 ## Configuration Comparison
 
-### Qwen3.8-27B-NVFP4 (docker-compose.qwen3.8.yml, experimental)
+### Qwen3.8-27B-NVFP4 (docker-compose.qwen3.8.yml, default)
 
 ```yaml
 qwen3-8-27b-nvfp4-engine:
@@ -220,29 +262,60 @@ qwen3-8-27b-nvfp4-engine:
   volumes:
     - vllm-qwen38-triton-cache:/root/.triton/cache
   command:
-    --model Inferact/Qwen3.8-27B-NVFP4
+    --model nvidia/Qwen3.8-27B-NVFP4
     --served-model-name qwen3.8-27b
     --dtype auto
-    --quantization modelopt
-    --kv-cache-dtype fp8
+    --kv-cache-dtype fp8_e4m3
     --gpu-memory-utilization 0.6
     --max-model-len 262144
     --max-num-seqs 4
     --max-num-batched-tokens 8192
-    --load-format fastsafetensors
     --mamba-ssm-cache-dtype float32
-    --attention-backend flashinfer
+    --trust-remote-code
+    --enable-auto-tool-choice
     --tool-call-parser qwen3_coder
     --reasoning-parser qwen3
+    --mm-encoder-tp-mode data
+    --seed 0
     --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN38_NUM_SPECULATIVE_TOKENS:-3}}'
 ```
 
-Explicit `--quantization modelopt` — same scheme qwen3.6 uses. No `--moe-backend` or MoE-specific env vars —
-this is a dense model, unlike every other engine in this table. **Real measured throughput ~17.5 tok/s**, same
-slow class as the previously-tried Unsloth checkpoint — see `docker-compose.qwen3.8.yml`'s PROVENANCE, RESULT,
-and ARCHIVED sections for the full investigation of both checkpoints tried so far. Not recommended for real use.
+No `--quantization` flag — auto-detected from the checkpoint's compressed-tensors-shaped `config.json` (despite
+the model card's own "quantized with Model Optimizer" framing). No `--moe-backend` or MoE-specific env vars —
+this is a dense model, unlike every other engine in this table.
 
-### Qwen3.6-35B-A3B-NVFP4 (docker-compose.qwen3.6.yml, default)
+**SIMPLIFICATION PASS (2026-09-09/10):** following a report of excessive agentic self-verification (26 tool-call
+steps on one subtask vs. 7-13 on others in the same OpenCode run), `--override-generation-config` and
+`--default-chat-template-kwargs` were dropped to let the model's own `generation_config.json`/chat-template
+defaults apply, matching NVIDIA's official sample command exactly on this axis. **This did NOT change the actual
+sampling behavior** — the checkpoint's own shipped `generation_config.json` specifies `temperature: 1.0, top_k:
+20, top_p: 0.95`, identical to what the removed override was setting, so this was confirming the vendor default
+rather than fixing a misconfiguration. `enable_thinking` remains on by default either way (never explicitly set),
+so the known "small `max_tokens` can return an empty response, all tokens spent on reasoning" behavior is
+unchanged — confirmed via direct retest. Also dropped as unneeded cruft, not tied to any known incident:
+`--load-format fastsafetensors`, `--attention-backend flashinfer`, `--async-scheduling`, `--enable-prefix-caching`,
+`--uvicorn-log-level warning`. Kept despite being absent from the official command — each tied to a real incident
+or correctness need: `--trust-remote-code`, `--mamba-ssm-cache-dtype float32`, `--speculative-config` (MTP), and
+the GB10-safe `0.6/4/8192` memory values (not the official recipe's GB300-scaled `0.85/32/32768` — this box's own
+history shows 0.85 causes real swap). See `docker-compose.qwen3.8.yml`'s SIMPLIFICATION PASS note for the full
+reasoning.
+
+**Real live-usage throughput, measured across two windows:**
+- 6-hour/221-sample window (before the simplification pass): 20.4 tok/s median (20.26 mean, steady/sustained)
+- Post-simplification/421-sample window: 22.8 tok/s median (26.41 mean — mean now above median, reflecting some
+  heavily-batched/concurrent intervals) — a real ~12% median improvement, most likely from the freed-up KV cache
+  headroom (see below) letting more requests batch together during busy periods, not from any sampling/thinking
+  change (which, per above, didn't actually change)
+
+KV cache headroom also improved after the simplification pass: 1,309,255 tokens / 4.99x concurrency (up from
+746,890 tokens / 2.85x) at the same `--gpu-memory-utilization 0.6` — freed by dropping the removed flags. The
+earlier synthetic single-request benchmark measured ~24.3-24.9 tok/s (two independent 700-token runs, pre-dating
+the simplification pass), a real ~35-40% improvement over the retired Inferact checkpoint's ~17.5-18.5 tok/s, but
+still memory-bandwidth-bound like every Qwen3.8 checkpoint tried so far — live numbers above are what actually
+matters for real usage. See `docker-compose.qwen3.8.yml`'s CHECKPOINT SWAP/RESULT sections (and the ARCHIVED
+section) for the full investigation across all three checkpoints tried.
+
+### Qwen3.6-35B-A3B-NVFP4 (docker-compose.qwen3.6.yml, rollback)
 
 ```yaml
 qwen3-6-35b-nvfp4-engine:
@@ -352,20 +425,29 @@ nemotron-embed-engine:
 
 ## Selecting the Right Model
 
-### Choose Qwen3.8-27B-NVFP4 (experimental — not currently recommended) if:
+### Choose Qwen3.8-27B-NVFP4 (default) if:
 
-- You specifically need **vision support** (screenshots, diagrams) and can accept ~17-20 tok/s
-- You want to help further investigate the throughput gap (see CHANGELOG.md — dense-vs-MoE architecture is the
-  current leading theory, not fixable by kernel/config changes; two checkpoints and two kernel backends tried)
+- You're doing **coding tasks** with Cline/Claude Code and want the **better accuracy** — NVIDIA's own published
+  benchmarks show qwen3.8 ahead of qwen3.6 on every overlapping metric (GPQA Diamond, AA-LCR, SciCode, IFBench —
+  see Accuracy Benchmarks above)
+- You specifically need **vision support** (screenshots, diagrams) — the only stack of the two with a vision
+  encoder
+- You can accept the confirmed throughput trade: a real 6-hour/221-sample live test measured **20.4 tok/s
+  median (20.26 mean)**, roughly **~2x slower** than qwen3.6's informal ~40-45 tok/s live estimate (qwen3.6's
+  often-cited ~83-84 tok/s is a synthetic single-request number, not representative of live use)
+- Understand this is an explicit, deliberate trade (accuracy over raw speed) — the live test above is now DONE,
+  not pending, and confirms the cost is real; the user is sticking with the accuracy-over-speed call anyway
 
-### Choose Qwen3.6-35B-A3B-NVFP4 (default) if:
+### Choose Qwen3.6-35B-A3B-NVFP4 (rollback) if:
 
-- You're doing **coding tasks** with Cline/Claude Code — this is the primary/default stack, ~83 tok/s
+- You need **maximum throughput** under real/live usage — ~40-45 tok/s live (informal estimate; up to ~83-84
+  tok/s in a clean synthetic single-request benchmark)
 - You need **large context** (up to 262K tokens) for long documents
 - You need **native tool calling** — `qwen3_xml` parser, confirmed against the official recipe 2026-09-02
   (see `docker-compose.qwen3.6.yml` corrections item 21)
 - You want **fast restarts** with FlashInfer cache persistence (already warmed from prior use)
-- You need **efficient memory usage** (only ~22GB weights)
+- You need **efficient memory usage** (only ~26GB weights)
+- You'd rather not accept qwen3.8's now-confirmed ~2x throughput cost, even with its accuracy advantage
 
 ### Choose Qwen3-Coder-Next-FP8 if:
 
@@ -391,7 +473,7 @@ nemotron-embed-engine:
 
 ## Testing Models
 
-### Test Qwen3.8-27B-NVFP4 (experimental)
+### Test Qwen3.8-27B-NVFP4 (default)
 
 ```bash
 # Switch to Qwen3.8
@@ -406,7 +488,7 @@ curl http://localhost:4000/v1/chat/completions \
   }'
 ```
 
-### Test Qwen3.6-35B-A3B-NVFP4 (default)
+### Test Qwen3.6-35B-A3B-NVFP4 (rollback)
 
 ```bash
 # Switch to Qwen3.6

@@ -2,6 +2,23 @@
 # docker-compose.qwen3.6.yml — Qwen3.6-35B-A3B-NVFP4 on NVIDIA DGX Spark (GB10)
 #
 # Main stack configuration. Includes full Langfuse/LiteLLM observability stack.
+# ROLLBACK STACK as of 2026-09-09 — docker-compose.qwen3.8.yml
+# (nvidia/Qwen3.8-27B-NVFP4) is now the default/primary stack, an explicit
+# user decision trading this model's higher throughput for qwen3.8's
+# meaningfully better accuracy on NVIDIA's own published benchmarks (GPQA
+# Diamond, AA-LCR, SciCode, IFBench — see docker-compose.qwen3.8.yml's
+# RESULT section for the full comparison).
+#
+# LIVE TEST RESULT (2026-09-09): qwen3.8's real 6-hour/221-sample live
+# throughput came back at 20.4 tok/s median (20.26 mean, steady/sustained) —
+# roughly 2x slower than this model's own live throughput, informally
+# reported at ~40-45 tok/s (not yet measured with the same 6-hour/sampled
+# rigor as qwen3.8's number — that would be needed for a fully fair
+# comparison). This model's ~83-84 tok/s figure elsewhere in this repo is a
+# clean synthetic single-request benchmark, not representative of either
+# model's real/live throughput. The user judged qwen3.8's benchmarked
+# accuracy gains worth the confirmed ~2x throughput cost. This file is kept
+# fully buildable and unmodified as the known-good rollback path regardless.
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.qwen3.6.yml up -d
