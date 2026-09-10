@@ -4,8 +4,8 @@
 # Qwen3-Coder-Next-FP8, and Nemotron-3-Super-120B)
 #
 # Usage:
-#   ./model-switch.sh qwen3.6  — Switch to Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
-#   ./model-switch.sh qwen3.8  — Switch to Qwen3.8-27B-NVFP4 (experimental)
+#   ./model-switch.sh qwen3.8  — Switch to Qwen3.8-27B-NVFP4 (DEFAULT)
+#   ./model-switch.sh qwen3.6  — Switch to Qwen3.6-35B-A3B-NVFP4 (rollback)
 #   ./model-switch.sh qwen     — Switch to Qwen3-Coder-Next-FP8
 #   ./model-switch.sh nemotron — Switch to Nemotron-3-Super-120B-A12B-NVFP4
 #   ./model-switch.sh status   — Show current model status
@@ -107,7 +107,7 @@ stop_all() {
     fi
 }
 
-# Switch to Qwen3.8-27B-NVFP4 (experimental — see CHANGELOG.md for the throughput investigation)
+# Switch to Qwen3.8-27B-NVFP4 (DEFAULT as of 2026-09-09 — see docker-compose.qwen3.8.yml)
 switch_to_qwen38() {
     log_info "Switching to Qwen3.8-27B-NVFP4..."
     stop_all
@@ -121,10 +121,10 @@ switch_to_qwen38() {
     echo "  Langfuse UI:    http://localhost:3000"
     echo "  LiteLLM API:    http://localhost:4000"
     echo "  vLLM Engine:    http://localhost:8301/v1"
-    echo "  Model:          unsloth/Qwen3.8-27B-NVFP4"
+    echo "  Model:          nvidia/Qwen3.8-27B-NVFP4"
 }
 
-# Switch to Qwen3.6-35B-A3B-NVFP4 (DEFAULT)
+# Switch to Qwen3.6-35B-A3B-NVFP4 (rollback)
 switch_to_qwen36() {
     log_info "Switching to Qwen3.6-35B-A3B-NVFP4..."
     stop_all
@@ -229,8 +229,8 @@ show_status() {
         log_info "No models currently running."
         echo ""
         echo "Start a model with:"
-        echo "  $0 qwen3.6  — Start Qwen3.6-35B-A3B-NVFP4 (default)"
-        echo "  $0 qwen3.8  — Start Qwen3.8-27B-NVFP4 (experimental)"
+        echo "  $0 qwen3.8  — Start Qwen3.8-27B-NVFP4 (default)"
+        echo "  $0 qwen3.6  — Start Qwen3.6-35B-A3B-NVFP4 (rollback)"
         echo "  $0 qwen     — Start Qwen3-Coder-Next-FP8"
         echo "  $0 nemotron — Start Nemotron-3-Super-120B-A12B-NVFP4"
     fi
@@ -246,14 +246,14 @@ show_help() {
     echo "  $0 --help      — Show this help message"
     echo ""
     echo "Models:"
-    echo "  qwen3.6   — Qwen3.6-35B-A3B-NVFP4 (default, 35B MoE 3B activated, text-only)"
-    echo "  qwen3.8   — Qwen3.8-27B-NVFP4 (experimental, 27B dense, vision-enabled)"
+    echo "  qwen3.8   — Qwen3.8-27B-NVFP4 (default, 27B dense, vision-enabled)"
+    echo "  qwen3.6   — Qwen3.6-35B-A3B-NVFP4 (rollback, 35B MoE 3B activated, text-only)"
     echo "  qwen      — Qwen3-Coder-Next-FP8 (80B total, FP8 quant)"
     echo "  nemotron  — Nemotron-3-Super-120B-A12B-NVFP4 (NVFP4 quant)"
     echo ""
     echo "Examples:"
-    echo "  $0 qwen3.6    # Switch to Qwen3.6-35B-A3B-NVFP4 (default)"
-    echo "  $0 qwen3.8    # Switch to Qwen3.8-27B-NVFP4 (experimental)"
+    echo "  $0 qwen3.8    # Switch to Qwen3.8-27B-NVFP4 (default)"
+    echo "  $0 qwen3.6    # Switch to Qwen3.6-35B-A3B-NVFP4 (rollback)"
     echo "  $0 qwen       # Switch to Qwen3-Coder-Next-FP8"
     echo "  $0 nemotron   # Switch to Nemotron-3-Super-120B"
     echo "  $0 status     # Check which model is running"

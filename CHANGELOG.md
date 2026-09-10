@@ -6,6 +6,277 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Qwen3.8 is the default/primary model again, Qwen3.6 is now the rollback** (2026-09-09, reverting the
+  2026-08-24 fallback to qwen3.6 — explicit user decision). Driven by two findings from the same-day checkpoint
+  swap `Inferact/Qwen3.8-27B-NVFP4` → `nvidia/Qwen3.8-27B-NVFP4` (see `docker-compose.qwen3.8.yml`'s CHECKPOINT
+  SWAP/RESULT sections): (1) NVIDIA's own published accuracy benchmarks show qwen3.8 ahead of qwen3.6 on every
+  overlapping metric — GPQA Diamond +3.2 (88.01 vs 84.8), AA-LCR +11.4 (73.38 vs 62.0), SciCode +7.8 (48.41 vs
+  40.6), IFBench +16.1 (78.93 vs 62.8); (2) the real-world throughput gap is narrower than the 2026-08-24 decision
+  assumed — the new checkpoint measures ~24.3-24.9 tok/s (direct engine, two independent 700-token runs), a real
+  ~35-40% improvement over the retired Inferact checkpoint's ~17.5-18.5 tok/s, and qwen3.6's oft-cited ~83-84
+  tok/s turns out to be a clean synthetic single-request number rather than representative of live usage — the
+  user reports qwen3.6 typically runs ~40-45 tok/s live, making the actual gap ~1.6-1.8x, not ~3.3x. This is an
+  explicit, deliberate trade the user chose to accept (accuracy over raw speed), **not a proven win** — a real
+  head-to-head live test (same prompts/harness, both engines) is still pending. Flipped default/rollback labeling
+  across `README.md`, `CLAUDE.md`, all of `docs/*.md`, `scripts/restart.sh` and `model-switch.sh` (no-arg default
+  now starts qwen3.8), and `litellm-config.yaml` (`default_fallbacks` back to `qwen3.8-27b`, model_list
+  reordered). `docker-compose.qwen3.6.yml` is unchanged and still fully buildable — nothing about qwen3.6 was
+  removed, only which one starts by default.
+  - Also added a new Accuracy Benchmarks table (GPQA Diamond/AA-LCR/SciCode/IFBench) to `docs/models.md`, and
+    updated all throughput figures there and in `docker-compose.qwen3.8.yml`'s Configuration Comparison example
+    to the new measured values.
+  - **Addendum (same day): the real head-to-head live test noted above as "still pending" is now DONE.** A
+    6-hour window sampled 221 active generation requests on `qwen3-8-27b-nvfp4-engine` and measured a sustained
+    **20.4 tok/s median (20.26 mean)** — mean and median nearly identical, so this is steady real-usage
+    throughput, not a number skewed by bursts. Against qwen3.6's own informal live estimate (~40-45 tok/s, not
+    yet measured with the same rigor), qwen3.8 is roughly **~2x slower** under real live conditions — a larger,
+    more clear-cut gap than the ~1.6-1.8x this entry originally estimated (that estimate mismatched a synthetic
+    qwen3.8 number against a live qwen3.6 number). The throughput cost is real and now confirmed, not just
+    narrower-than-feared; the user is sticking with the accuracy-over-speed call regardless. qwen3.8 remains the
+    default. Updated `docs/agents.md` and `docs/models.md` (all "still pending" language for this comparison) to
+    reflect the completed test; `CLAUDE.md`, `docker-compose.qwen3.8.yml`, `docker-compose.qwen3.6.yml`, and
+    `litellm-config.yaml` were updated separately with this same result.
+
+- **`docker-compose.qwen3.8.yml`: SIMPLIFICATION PASS — dropped `--override-generation-config` and
+  `--default-chat-template-kwargs` (2026-09-09/10).** Prompted by a real OpenCode behavior report: one subtask
+  ("add plain CSS styling, keep it simple") took 26 internal tool-call steps and 22m10s, vs. 7-13 steps and
+  3-11 minutes for every other subtask in the same 10-subtask run — the model built a from-scratch jsdom test
+  harness, round-tripped an `npm install`/`uninstall` with md5sum verification of `package.json`, and ran a
+  bespoke CSS-property checker script four times, none of it requested. Suspected cause: `temperature: 1.0`
+  (vs. qwen3.6's `0.6`) combined with `enable_thinking` on by default (vs. qwen3.6's explicit
+  `enable_thinking:false`) — both carried over without being deliberately chosen for agentic behavior.
+  **Correction after testing:** removing `--override-generation-config` did NOT change actual sampling —
+  `nvidia/Qwen3.8-27B-NVFP4`'s own shipped `generation_config.json` specifies `temperature: 1.0, top_k: 20,
+  top_p: 0.95`, identical to what was removed, so temperature 1.0 turns out to be NVIDIA's genuine intended
+  default for this checkpoint, not an unverified carry-over. `enable_thinking` was never explicitly set for
+  qwen3.8 either way, so its default-on behavior (and the small-`max_tokens`-returns-empty-response risk that
+  comes with it) is unchanged — reconfirmed via direct retest post-change. **Net effect: the over-verification
+  report is neither fixed nor tested as fixed by this pass** — it only ruled out "unnecessary config cruft" as
+  the explanation. Also dropped (no known incident, matches the official model card's command): `--load-format
+  fastsafetensors`, `--attention-backend flashinfer`, `--async-scheduling`, `--enable-prefix-caching`,
+  `--uvicorn-log-level warning`. Kept despite being absent from the official command: `--trust-remote-code`,
+  `--mamba-ssm-cache-dtype float32`, `--speculative-config` (MTP), and the GB10-safe `0.6`/`4`/`8192` memory
+  values (not the official recipe's GB300-scaled `0.85`/`32`/`32768` — this box's own history shows 0.85 causes
+  real swap). Unexpected side effect: KV cache headroom nearly doubled (746,890 → 1,309,255 tokens, 2.85x →
+  4.99x concurrency) at the same `--gpu-memory-utilization 0.6`. Post-pass live measurement (421 samples): 22.8
+  tok/s median (26.41 mean, mean now above median) — a real ~12% median improvement over the pre-pass 20.4
+  tok/s, most likely explained by the extra concurrency headroom rather than any sampling change. Updated
+  `CLAUDE.md`, `litellm-config.yaml`, and `docs/models.md` with the same result.
+
+- **`litellm-config.yaml`: `request_timeout` raised 600 → 1500 (2026-09-09).** The calling OpenCode harness
+  enforces its own 1200s ceiling per agentic turn, and the subtask above ran 22m10s (1330s) — longer than the
+  old 600s value — without (per the report) being killed by our proxy first. Unclear whether `request_timeout`
+  is enforced as a hard wall-clock cap on streaming responses in this LiteLLM build, but 600 < 1200 was a
+  latent mismatch regardless; 1500 gives real headroom above the harness's own ceiling.
+
+- **`docker-compose.qwen3.6.yml`: added `"enable_thinking":false` to `--default-chat-template-kwargs`, confirmed
+  `--tool-call-parser qwen3_xml` against a freshly-pasted official recipe (2026-09-02).** Root cause of a real
+  user-reported symptom — "long tickets with many requirements, some tasks never get implemented" — was found to
+  be reasoning-token consumption competing with the actual output for the same per-request `max_tokens` budget:
+  a synthetic 9-requirement ticket at `max_tokens=3000` measured 72-91% of the budget spent on the model's
+  internal reasoning trace across repeated runs, with one run truncating mid-plan at requirement 4 of 9.
+  `enable_thinking:false` eliminates this (0 reasoning tokens, full budget to actual content; 3/3 repeat runs
+  covered all 9 requirements). Separately, the user pasted the exact current official
+  `recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B?variant=nvfp4` DGX-Spark command, settling this file's long-running
+  `--tool-call-parser` flip-flop (items 11/16/17/19/20): every flag matched the running config exactly,
+  including `qwen3_xml`, which was already in place — no change needed there, but it's now confirmed rather than
+  doc-derived. Full investigation, including an end-to-end real-Cline-CLI verification against a cloned
+  open-source repo, is in
+  `ai-workspace/summary-reports/qwen3.6-reasoning-token-budget-fix-2026-09-02.md`. Corrected stale
+  `qwen3_coder`-as-current-and-verified claims (superseded by the 2026-08-28 entry below, which this file itself
+  had not caught up to) in `CLAUDE.md`, `litellm-config.yaml`, `docs/models.md`, and `docs/architecture.md`.
+
+- **`docker-compose.qwen3.6.yml`: added `--mm-encoder-tp-mode data`, changed `--tool-call-parser qwen3_coder` →
+  `qwen3_xml`, added `--reasoning-parser qwen3` (2026-08-28).** Three engine optimizations:
+  - `--mm-encoder-tp-mode data`: Switches multi-modal encoder from weight-splitting tensor parallelism to
+    data-parallel mode (each GPU holds full weights, splits batch across GPUs). This improves throughput
+    when the encoder is compute-bound rather than memory-bound. Source: vLLM's `MMEncoderTPMode` config type.
+  - `--tool-call-parser qwen3_xml`: Changed from `qwen3_coder` to align with the official vLLM recipe at
+    `recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B`. Previously verified that `qwen3_coder` worked correctly in tool-calling
+    tests; this change is evidence-based (official recipe) rather than empirically verified against current traffic.
+  - `--reasoning-parser qwen3`: New explicit parser for Qwen3-family models to ensure proper extraction of
+    chain-of-thought reasoning traces.
+  - Full details in `ai-workspace/summary-reports/qwen3.6-engine-optimizations-2026-08-28.md`.
+
+- **`litellm-callbacks/anthropic_input_text_fix.py`: found and fixed the actual root cause of the skills-listing
+  gap — `role: "system"` messages injected mid-conversation were silently dropped whole** (2026-08-28). The two
+  fixes above narrowed the problem but didn't close it: real-world retesting from the Windows Claude Code client
+  still showed only 1 of 10 skills after both were live. Captured the actual raw request Claude Code sends
+  (temporary `async_pre_call_hook` logging on the proxy, removed after use) and found the full 10-skill listing
+  present verbatim — not in the top-level `system` field, but in `messages[1]`, a discrete message with
+  `"role": "system"` injected mid-conversation (Claude Code's own convention, alongside similar messages for the
+  available-agent-types listing and a token-budget reminder — likely kept out of the main cached system block so
+  that block stays stable across turns for prompt-caching purposes). Anthropic's real Messages API only defines
+  `"user"`/`"assistant"` roles for the `messages` array; `translate_anthropic_messages_to_openai()` in
+  `litellm/llms/anthropic/experimental_pass_through/adapters/transformation.py` has no branch for any other role,
+  so the entire message — all 10 skill descriptions, verbatim — was silently discarded before ever reaching the
+  backend model, no error, no log. This is why the earlier synthetic reproductions (block-type substitution in
+  `system`) never caught it: the real bug isn't in content-block typing at all, it's an entire message shape
+  litellm's translator was never written to expect.
+  - **Fix**: extended the existing `async_pre_call_hook` callback to fold any `role: "system"` messages into the
+    top-level `system` field (as `"text"` blocks, preserving order) before litellm's translator runs, removing
+    them from `messages` so the remaining user/assistant turn alternation stays valid.
+  - **Verified two ways**: (1) replayed the exact captured real request (5 messages, including both `role:
+    "system"` messages) directly against the fixed proxy — the streamed response correctly listed all 10 skills,
+    verbatim, unprompted; (2) independently, the user re-ran the same "list your skills" query from the real
+    Windows Claude Code client under the `local` profile and got the identical, correct 10-skill table, now
+    matching the `vllm` (direct) profile's output exactly.
+  - This fully explains the original investigation's symptom (Claude Code enumerating a skill/tool listing
+    correctly via direct vLLM but not via LiteLLM) — the `container`/skills field on `anthropic_messages_handler()`
+    was checked and ruled out (it's read into a local variable and never used anywhere downstream in either
+    routing path, but this is Anthropic's separate server-side code-execution Skills API, not how Claude Code CLI
+    delivers its local skill manifest — confirmed by capturing the real request, which never populated it).
+
+- **New `litellm-callbacks/anthropic_input_text_fix.py`: fixed `/v1/messages` silently dropping non-`"text"`
+  content blocks (`"input_text"`/`"output_text"`) from the system prompt and message history** (2026-08-28),
+  found via real-world reproduction on a second machine: a Claude Code v2.1.241 session on Windows, talking to
+  this same `qwen3.6-35b-a3b` model, correctly listed all 10 configured skills when using the
+  `claude-provider-switch` skill's `vllm` (direct) profile, but the identical question via the `litellm` profile
+  got a generic non-answer claiming no skills existed — the exact symptom the earlier thinking-block investigation
+  set out to explain, now reproduced against a real Claude Code client rather than a synthetic request. This is a
+  **separate bug from the thinking-block fix below**: that one was response-side (model reasoning stripped on the
+  way out); this one is request-side (part of the system prompt stripped on the way in, before vLLM ever sees it).
+  - **Reproduced directly**: sent an Anthropic-format request with `system` containing one `"text"` block and one
+    `"input_text"` block (the type upstream issue
+    [#23841](https://github.com/BerriAI/litellm/issues/23841) names as the culprit for Claude Code CLI) to both
+    endpoints. Direct vLLM (`:8301`) **rejected it outright** with a `400` (`input_text` is not a valid Anthropic
+    content-block type per vLLM's own strict validator: only `text`, `image`, `tool_use`, `tool_result`,
+    `tool_reference`, `thinking`, `redacted_thinking` are accepted). Via LiteLLM (`:4000`), the request returned
+    `200 OK` but the model's own reasoning gave it away: *"I don't have a predefined list of 'skill names' in my
+    system prompt"* — the `input_text` block's content never reached it. Root cause confirmed in source:
+    `_add_system_message_to_messages()` in
+    `litellm/llms/anthropic/experimental_pass_through/adapters/transformation.py` only forwards blocks where
+    `block.get("type") == "text"`; anything else is silently skipped, no error, no log. The same narrow-type
+    filtering exists in the user-message content-block loop (`translate_anthropic_messages_to_openai()`) and,
+    per #23841, in three spots in the Responses API adapter too — so this is **not fixable by the
+    `use_chat_completions_url_for_anthropic_messages` flag** used for the thinking-block fix; both translation
+    paths share the flaw.
+  - **Why a pass-through bypass wasn't used here**: LiteLLM's `SafeRouteAdder` (in
+    `litellm/proxy/pass_through_endpoints/pass_through_endpoints.py`) only registers a `pass_through_endpoints`
+    route if the exact path+method isn't already registered — and `/v1/messages` is already claimed by litellm's
+    own (buggy) built-in handler, so a same-path bypass silently no-ops. A different path would need Claude
+    Code's `claude-provider-switch litellm` profile reconfigured client-side, out of scope without touching the
+    Windows machine.
+  - **Fix**: a `CustomLogger.async_pre_call_hook` callback (`litellm-callbacks/anthropic_input_text_fix.py`,
+    registered via `litellm_settings.callbacks`) that normalizes `type: "input_text"`/`"output_text"` blocks to
+    `type: "text"` on the raw request body — before any of litellm's lossy translation code runs, and independent
+    of which routing path (chat/completions vs. Responses API) is active. Chosen over patching litellm's own
+    source files directly: `async_pre_call_hook` is a documented, stable extension point, whereas the vendor
+    files live inside a mutable `:main-latest` image and would silently rot (or need re-syncing) on every image
+    pull. Mounted into all four compose files' `litellm-proxy` service (each defines it independently, per
+    `litellm-config.yaml`'s own header comment on the shared-config design) at `/app/anthropic_input_text_fix.py`,
+    since litellm resolves `callbacks:` module paths relative to the mounted config file's directory (`/app`).
+  - **Verified**: recreated `litellm-proxy` (a plain restart doesn't pick up new volume mounts), re-sent the same
+    `input_text`-containing request through `:4000/v1/messages` — `usage.input_tokens` went from `45` (block
+    dropped) to `63` (block forwarded, matching the added content's token count), and the model's reasoning now
+    correctly reproduces both skill names from the previously-invisible block.
+  - Full investigation and reproduction detail (both fixes) is in
+    `ai-workspace/summary-reports/anthropic-messages-thinking-passthrough-fix-2026-08-28.md`.
+
+- **`litellm-config.yaml`: fixed `/v1/messages` silently dropping `thinking` content blocks for the `openai/`-
+  prefixed vLLM backends** (2026-08-28), found while investigating why Claude Code could enumerate a large
+  skill/tool listing when pointed directly at vLLM (`:8301`) but not through LiteLLM (`:4000`). Root cause,
+  confirmed by reading LiteLLM 1.82.6's actual source inside the running `litellm-proxy` container (not inferred):
+  LiteLLM's `/v1/messages` handler routes any `openai/`-prefixed model through its OpenAI **Responses API**
+  translation bridge by default (`_should_route_to_responses_api()` in
+  `litellm/llms/anthropic/experimental_pass_through/messages/handler.py`), not through chat/completions. vLLM's
+  native `/v1/responses` (confirmed working — `nightly` build does implement it) puts the actual reasoning trace
+  under `output[].content[].text` (`type: "reasoning_text"`) and leaves `output[].summary: []` permanently empty,
+  since populating `summary` requires OpenAI's own proprietary reasoning-summarizer step, which vLLM doesn't
+  replicate. LiteLLM's `responses_adapters/transformation.py::translate_response()` only reads `item.summary` for
+  `ResponseReasoningItem` — never `item.content` — so the `thinking` block was dropped on **every** request
+  through this backend, deterministically, not as a truncation-size artifact. It was invisible in normal use
+  (final `text` block still arrived intact) and only became destructive when a response was truncated mid-
+  reasoning by `max_tokens`: direct vLLM still returned the partial reasoning trace (usually containing the
+  answer); LiteLLM returned `content: []`, nothing at all.
+  - **Fix**: `use_chat_completions_url_for_anthropic_messages: true` added to `litellm_settings`. Verified correct
+    for our exact `custom_llm_provider == "openai"` code path in 1.82.6 — flips `_should_route_to_responses_api()`
+    to `False`, routing through the chat/completions adapter instead, which already has an explicit
+    `reasoning_content` → `thinking`-block fallback (`adapters/transformation.py`, ~line 1225) that the Responses
+    path lacks. Zero blast radius on this config: no `model_list` entry here is a real OpenAI-API model, only
+    `openai/`-prefixed vLLM backends.
+  - Corroborated by upstream LiteLLM issues
+    [#29518](https://github.com/BerriAI/litellm/issues/29518) (reasoning_content dropped for OpenAI-compatible
+    chat-completions backends) and [#23841](https://github.com/BerriAI/litellm/issues/23841) (multiple bugs in
+    this same experimental `/v1/messages`→OpenAI pass-through) — separately checked that #23841's "opt-out env
+    var ignored" bugs live in a different function (`responses_api_bridge_check` in `main.py`, used elsewhere)
+    and do not undermine this fix's routing check.
+  - **Verified**: restarted `litellm-proxy`, re-sent the original Anthropic-format request through
+    `POST :4000/v1/messages` — `thinking` block now present and populated (including on a `max_tokens`-truncated
+    response, where it previously came back as `content: []`).
+  - Full investigation and reproduction detail:
+    `ai-workspace/summary-reports/anthropic-messages-thinking-passthrough-fix-2026-08-28.md`.
+
+- **`docker-compose.qwen3.6.yml` aligned against the official vLLM recipe** for this exact checkpoint/hardware
+  (`https://recipes.vllm.ai/Qwen/Qwen3.6-35B-A3B?hardware=dgx_spark_gb10&variant=nvfp4`), fetched and diffed
+  directly against the running config (2026-08-27). Most flags already matched (`kv-cache-dtype fp8`,
+  `moe-backend marlin`, `max-model-len 262144`, `max-num-batched-tokens 8192`, `load-format fastsafetensors`,
+  `reasoning-parser qwen3`, `enable-prefix-caching`, the speculative-config's `num_speculative_tokens 3` +
+  `moe_backend triton`). Three real discrepancies found and applied:
+  - **`--tool-call-parser qwen3_xml` → `qwen3_coder`** (corrections item 19). This flag had already flip-flopped
+    three times in this file's own history (items 11/16/17) based on reasoning/analogy from an NVIDIA model-card
+    claim — this change is different: a direct fetch of an independent, apparently-current primary source that
+    disagrees with that claim. **Verified afterward** with a real tool-calling test (see below) — not shipped on
+    faith the way earlier flip-flops were.
+  - **`--gpu-memory-utilization 0.6 → 0.5`** (item 20, explicit request). Real boot measured 12.45 GiB KV cache
+    available — close to a pre-boot estimate (~10-11 GiB) extrapolated from this file's own `0.4`-crashed /
+    `0.6`-worked data points, and positive/working, just with less margin than `0.6` had.
+  - **`--max-num-seqs 4 → 8`** (item 20). Required also densifying `--compilation-config`'s
+    `cudagraph_capture_sizes` from covering 1-16 to 1-32 (the effective MTP decode-batch ceiling scales with
+    `max-num-seqs * (1 + num_speculative_tokens)`) — changing `max-num-seqs` alone would have silently
+    reintroduced the mid-inference Triton JIT warmup-gap issue that capture-size list was added to fix.
+  - **Real tool-calling verification** (first in this project's history — every prior test was throughput
+    benchmarks or plain chat completions): built a 5-tool coding-agent palette (`search_code`, `read_file`,
+    `write_file`, `execute_command`, `invoke_skill`) and tested single-turn and multi-turn (with synthetic
+    tool-result history) tool selection against the live API. All 5 tools correctly selected with well-formed
+    JSON arguments, including correctly inferring an argument from a prior turn's tool result and correctly
+    invoking a skill-style tool with real diff content. One caveat: low `max_tokens` (400) on a write-heavy call
+    returned empty `{}` arguments instead of erroring (fixed by raising to 900, reproducible at temp 0.6 and 0.0)
+    — not expected to matter in real Cline/Claude Code use, which sets much larger budgets.
+
+- **`docker-compose.qwen3.8.yml`: checkpoint swapped `unsloth/Qwen3.8-27B-NVFP4` → `Inferact/Qwen3.8-27B-NVFP4`
+  (2026-08-26), user-suggested via a pasted analysis citing recipes.vllm.ai. Verified directly (raw `config.json`
+  fetch): this checkpoint uses NVIDIA ModelOpt quantization (`quant_method: "modelopt"`, `quant_algo: "NVFP4"`,
+  W4A4, group size 16) — the same scheme qwen3.6 uses successfully via Marlin — and does NOT quantize `lm_head`
+  (unlike the retired Unsloth checkpoint, whose quantized `lm_head` caused the Marlin-FP8 crash documented in the
+  prior throughput investigation). Genuinely evidence-based reason to try it, not just a vendor swap.
+  - **Real result (tested on this hardware): did not fix the throughput problem.** Clean boot (weights 24.97 GiB,
+    24.74 GiB KV cache at `--gpu-memory-utilization 0.6`, no crash), but vLLM auto-selected the same NATIVE
+    `FlashInferCutlassNvFp4LinearKernel` as the retired Unsloth checkpoint — NOT Marlin, despite
+    `VLLM_NVFP4_GEMM_BACKEND=marlin` being set and despite qwen3.6 using Marlin for this identical quant_method on
+    the same hardware/vLLM build (reason for the discrepancy unconfirmed). Real generation throughput: 700 tokens
+    in 39.95s = **17.52 tok/s**, with the same 96% GPU utilization / ~34W power draw signature as the retired
+    checkpoint's ~20 tok/s. The recipe's own benchmark claims (0.897 MTP acceptance, etc.) were measured on 2x
+    RTX 5090 and did not translate here. A same-prompt, same-length (700 tokens) direct comparison against
+    qwen3.6 immediately after switching back made the diagnosis cleaner than any earlier test: qwen3.6 hit
+    83.25 tok/s at 96% GPU utilization / ~34.5W — essentially identical utilization and power draw to qwen3.8's
+    17.52 tok/s, but 4.75x the throughput. Confirms the GPU isn't simply "busier" on qwen3.6; its kernel path
+    does far more useful work per unit of that same occupancy/power.
+  - The pasted analysis that prompted this swap had real red flags (malformed citation markup consistent with an
+    unverified secondary AI summary, numbers that didn't match this session's own direct fetches of the same
+    pages) — worth noting as a pattern: this project's own research already treats unsourced specific benchmark
+    claims about this model family with suspicion (see the original qwen3.8 addition's PROVENANCE header), and
+    this incident is another data point for that caution, not an exception to it.
+  - **Follow-up test: forced the same Marlin kernel qwen3.6 uses, to test whether kernel choice was the
+    bottleneck.** Added `--linear-backend marlin` to `docker-compose.qwen3.8.yml`. This time kernel selection
+    *did* change (log-confirmed `MarlinNvFp4LinearKernel`, unlike the no-op env var above) and the boot was
+    clean — no crash, even more KV cache headroom (29.32 GiB vs. 24.74 GiB), consistent with this checkpoint's
+    unquantized `lm_head` avoiding the crash the same flag caused on the retired Unsloth checkpoint. **Result:
+    18.55 tok/s — only ~6% higher than the native-kernel run, within noise, still nowhere near qwen3.6's
+    83.25 tok/s on the identical prompt.** This rules out kernel choice as the primary bottleneck empirically,
+    not just theoretically: forcing the exact kernel that makes qwen3.6 fast barely moved the number.
+  - **Revised root-cause theory**: the earlier "immature SM121 kernel support, may improve with a newer vLLM
+    build" framing from the original Unsloth investigation is likely wrong, or at best a minor factor. The
+    dominant difference is now believed to be architectural — qwen3.6 is MoE (~3B of 35B params active per
+    token); both Qwen3.8 checkpoints are dense (all 27B active every token), meaning roughly 9x more weight
+    streamed through memory per generated token regardless of kernel efficiency. Unlike a kernel-maturity gap,
+    this is not fixable by a future vLLM/CUTLASS release or driver update — it would require a sparse/MoE
+    variant of this model class from its base-model authors (the Qwen team, not NVIDIA — NVIDIA/Unsloth/Inferact
+    only quantize whichever architecture already exists).
+  - **qwen3.6 remains the only proven-fast option (~83.7 tok/s) and the default.** Neither qwen3.8 checkpoint is
+    recommended for Cline/Claude Code use today. Full detail (including the archived Unsloth investigation) is in
+    `docker-compose.qwen3.8.yml`'s header.
+
 - **Qwen3.6 is the default/primary model again, Qwen3.8 is now experimental** (2026-08-24, reverting the
   2026-08-23 attempt to make qwen3.8 the default). Driven by two findings: qwen3.8's throughput investigation
   (below) found no working fix for its ~20 tok/s vs. qwen3.6's ~40-84 tok/s, and qwen3.8's `--tool-call-parser

@@ -8,22 +8,50 @@
 # health checks / requests until that stack is started — this is the existing
 # design, not something new here.
 #
-# qwen3.6-35b-a3b is the PRIMARY/DEFAULT entry (docker-compose.qwen3.6.yml,
-# port 8301, --served-model-name qwen3.6-35b-a3b → openai/qwen3.6-35b-a3b).
-# qwen3.8-27b is KEPT (not deleted), reachable if docker-compose.qwen3.8.yml
-# is brought up instead — but it's EXPERIMENTAL, not the default, as of
-# 2026-08-24: measured throughput ~20 tok/s vs qwen3.6's ~40-84 tok/s with no
-# working fix found (two kernel-backend levers tried, both failed — see
-# CHANGELOG.md), and its --tool-call-parser qwen3_xml is still unverified
-# against a real tool-calling session. See docker-compose.qwen3.8.yml's
-# PROVENANCE and CORRECTIONS HISTORY headers for the full investigation.
+# qwen3.8-27b is the PRIMARY/DEFAULT entry as of 2026-09-09
+# (docker-compose.qwen3.8.yml, port 8301, --served-model-name qwen3.8-27b →
+# openai/qwen3.8-27b). Checkpoint is nvidia/Qwen3.8-27B-NVFP4 (swapped from
+# Inferact's — see docker-compose.qwen3.8.yml's CHECKPOINT SWAP/RESULT
+# headers). LIVE TEST RESULT (6-hour window, 221 active samples,
+# pre-simplification-pass): 20.4 tok/s median generation throughput (20.26
+# mean — steady/sustained, not bursty). That's roughly 2x slower than
+# qwen3.6's own live throughput (informally ~40-45 tok/s, not yet measured
+# with the same rigor). NVIDIA's own published accuracy benchmarks favor
+# qwen3.8 meaningfully: GPQA Diamond +3.2, AA-LCR +11.4, SciCode +7.8,
+# IFBench +16.1 over qwen3.6 (see docker-compose.qwen3.8.yml for the full
+# comparison). Explicit user decision to accept this confirmed ~2x
+# throughput cost for the accuracy gain. Tool-call parser is qwen3_coder
+# (matches the official model card's recipe) — UNVERIFIED against a real
+# tool-calling session on this specific checkpoint as of this swap; first
+# thing to check if Cline/Claude Code tool calls fail to parse.
 #
-# Model: nvidia/Qwen3.6-35B-A3B-NVFP4
-#   35B MoE (3B activated), NVFP4 quantized (NVIDIA ModelOpt)
+# SIMPLIFICATION PASS (2026-09-09/10): dropped --override-generation-config
+# and --default-chat-template-kwargs (see docker-compose.qwen3.8.yml).
+# Confirmed this did NOT change sampling — the checkpoint's own
+# generation_config.json already ships temperature 1.0/top_k 20/top_p 0.95,
+# identical to what was removed. enable_thinking is still on by default
+# either way — a small max_tokens can still return an empty response
+# (confirmed: 20 tokens → all reasoning, zero content). Post-pass live
+# measurement (421 samples): 22.8 tok/s median (26.41 mean) — a real ~12%
+# median improvement, most likely from freed KV cache headroom (1,309,255
+# tokens / 4.99x concurrency, up from 746,890 / 2.85x) allowing more
+# concurrent-request batching, not from any sampling change.
+#
+# qwen3.6-35b-a3b is KEPT (not deleted), reachable if docker-compose.qwen3.6.yml
+# is brought up instead — the known-good ROLLBACK path if qwen3.8's real-world
+# performance stops being worth the trade. --tool-call-parser qwen3_xml —
+# confirmed correct against a directly-pasted copy of the official
+# recipes.vllm.ai DGX-Spark command (2026-09-02, docker-compose.qwen3.6.yml
+# corrections item 21).
+#
+# Model: nvidia/Qwen3.8-27B-NVFP4
+#   27B dense, hybrid Gated-DeltaNet + Gated-Attention, vision-capable,
+#   mixed NVFP4 (MLP + lm_head) / FP8 (attention) quantization (NVIDIA ModelOpt)
 #   Engine port: 8301
-#   Vision support: no (text-only MoE checkpoint)
-#   Reasoning parser: qwen3 (required to prevent thinking tokens in output)
-#   Tool-call parser: qwen3_xml (official NVIDIA spec for this checkpoint)
+#   Vision support: yes
+#   Reasoning parser: qwen3
+#   Tool-call parser: qwen3_coder (per the official model card recipe;
+#     unverified on this checkpoint against real tool-calling — see above)
 #   max-model-len: 262144 (vLLM --max-model-len; full context window)
 # =============================================================================
 
@@ -38,26 +66,8 @@ model_list:
       model: "anthropic/*"
       api_key: os.environ/ANTHROPIC_API_KEY
 
-  # ── Primary chat model: nvidia/Qwen3.6-35B-A3B-NVFP4 ────────────────────────
-  # docker-compose.qwen3.6.yml, port 8301. Full 262K context window.
-  - model_name: qwen3.6-35b-a3b
-    litellm_params:
-      model: openai/qwen3.6-35b-a3b
-      api_base: http://qwen3-6-35b-nvfp4-engine:8000/v1
-      api_key: "none"
-    model_info:
-      max_tokens: 262144
-      max_input_tokens: 262144
-      max_output_tokens: 262144
-      supports_tool_choice: true
-      supports_function_calling: true
-      supports_vision: false
-      input_cost_per_token: 0.000000015
-      output_cost_per_token: 0.000000035
-
-  # ── Experimental alias: unsloth/Qwen3.8-27B-NVFP4 ───────────────────────────
-  # Only reachable if docker-compose.qwen3.8.yml is brought up instead of
-  # docker-compose.qwen3.6.yml. Not the default — see file header for why.
+  # ── Primary chat model: nvidia/Qwen3.8-27B-NVFP4 ────────────────────────────
+  # docker-compose.qwen3.8.yml, port 8301. Full 262K context window.
   - model_name: qwen3.8-27b
     litellm_params:
       model: openai/qwen3.8-27b
@@ -70,6 +80,25 @@ model_list:
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: true
+      input_cost_per_token: 0.000000015
+      output_cost_per_token: 0.000000035
+
+  # ── Rollback alias: nvidia/Qwen3.6-35B-A3B-NVFP4 ────────────────────────────
+  # Only reachable if docker-compose.qwen3.6.yml is brought up instead of
+  # docker-compose.qwen3.8.yml. Known-good fallback if qwen3.8's live test
+  # doesn't pan out — see file header for why.
+  - model_name: qwen3.6-35b-a3b
+    litellm_params:
+      model: openai/qwen3.6-35b-a3b
+      api_base: http://qwen3-6-35b-nvfp4-engine:8000/v1
+      api_key: "none"
+    model_info:
+      max_tokens: 262144
+      max_input_tokens: 262144
+      max_output_tokens: 262144
+      supports_tool_choice: true
+      supports_function_calling: true
+      supports_vision: false
       input_cost_per_token: 0.000000015
       output_cost_per_token: 0.000000035
 
@@ -104,16 +133,38 @@ litellm_settings:
   drop_params: true
   drop_unsupported_params: true
   modify_params: true
-  request_timeout: 600
+  # Route /v1/messages for openai/-prefixed models (our vLLM backends) through
+  # chat/completions instead of LiteLLM's default OpenAI Responses API bridge.
+  # vLLM's native /v1/responses leaves reasoning items' `summary` field empty
+  # (only OpenAI populates that via its proprietary summarizer), and LiteLLM's
+  # Responses->Anthropic translator only reads `summary` — never the raw
+  # `content` field vLLM actually puts reasoning text in — so thinking blocks
+  # were silently dropped on every request. The chat/completions adapter
+  # correctly falls back to `reasoning_content` for the `thinking` block.
+  # See: https://github.com/BerriAI/litellm/issues/29518
+  use_chat_completions_url_for_anthropic_messages: true
+  # request_timeout raised 600 -> 1500 (2026-09-09): the calling OpenCode
+  # harness enforces its own 1200s ceiling per agentic turn, and a real
+  # qwen3.8 subtask ran 22m10s (1330s) — longer than our old 600s value.
+  # It's unclear whether LiteLLM enforces request_timeout as a hard
+  # wall-clock cap on streaming responses (this particular over-long request
+  # wasn't observed to be killed by it), but 600 < 1200 was a latent
+  # mismatch regardless — our proxy should never be the earlier of the two
+  # cutoffs. 1500 gives headroom above the harness's own ceiling.
+  request_timeout: 1500
   stream_timeout: 300
   num_retries: 3
   # Catch-all: if a model group fails (after num_retries) and has no specific
   # entry in `fallbacks`, retry against the local primary engine. Applies to
   # anthropic/* passthrough failures (Anthropic API down/rate-limited) as well
   # as any other unmapped model group.
-  default_fallbacks: ["qwen3.6-35b-a3b"]
+  default_fallbacks: ["qwen3.8-27b"]
   turn_off_message_logging: false
-  callbacks: ["langfuse_otel"]
+  # anthropic_input_text_fix: normalizes Anthropic /v1/messages content
+  # blocks with type "input_text"/"output_text" to "text" before litellm's
+  # own translation silently drops them (see litellm-callbacks/ and
+  # CHANGELOG.md — matches https://github.com/BerriAI/litellm/issues/23841).
+  callbacks: ["langfuse_otel", "anthropic_input_text_fix.proxy_handler_instance"]
 
   # Redis exact-match prompt cache
   # ttl=3600: cached responses expire after 1 hour.

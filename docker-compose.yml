@@ -387,6 +387,7 @@ services:
       - "4000:4000"
     volumes:
       - ./litellm-config.yaml:/app/config.yaml:ro
+      - ./litellm-callbacks/anthropic_input_text_fix.py:/app/anthropic_input_text_fix.py:ro
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}         # set in .env — must start with sk-
       LITELLM_DROP_PARAMS: ${LITELLM_DROP_PARAMS:-true}
