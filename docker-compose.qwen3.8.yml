@@ -488,8 +488,9 @@
 #      --gpu-memory-utilization to 0.4159." Even that breakeven number would
 #      have left ~zero real KV cache room, not just less than qwen3.6 had —
 #      this model's peak-memory profiling pass (which includes profiling the
-#      vision encoder/multimodal path qwen3.6's text-only checkpoint never
-#      had to account for) eats meaningfully more headroom than qwen3.6's did
+#      vision encoder/multimodal path — NOTE 2026-10-03: qwen3.6 is NOT
+#      text-only as this originally claimed, it has a vision encoder too)
+#      eats meaningfully more headroom than qwen3.6's did
 #      at the same utilization value. 0.4 was a CARRIED-BY-ANALOGY assumption
 #      from qwen3.6's file, not verified for this model — this is exactly the
 #      kind of thing that section warned about. Confirmed weight load itself
