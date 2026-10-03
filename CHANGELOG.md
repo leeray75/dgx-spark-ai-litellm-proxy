@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Qwen3.6 image input rejected ("model doesn't support vision")** (2026-10-03). `litellm-config.yaml` had
+  `supports_vision: false` on `qwen3.6-35b-a3b`, so clients that read LiteLLM's model info (Cline, OpenCode, Claude
+  Code) left images out of requests and the model answered that it couldn't see images. The vLLM engine was never
+  the problem: `nvidia/Qwen3.6-35B-A3B-NVFP4` is `Qwen3_5MoeForConditionalGeneration` with a `vision_config`, and
+  `--mm-encoder-tp-mode data` already loads the encoder. The flag dates from v1.3.0, when the Qwen3.6-27B-FP8 →
+  35B-A3B-NVFP4 swap marked the new checkpoint "text-only" without checking. Set to `true`, and corrected the
+  "text-only" claims in `docs/models.md`, `docs/architecture.md`, `docs/troubleshooting.md`,
+  `docker-compose.qwen3.8.yml` comments and the `restart.sh` / `model-switch.sh` help text. Older CHANGELOG entries
+  are left as written.
+
 ### Changed
 
 - **Qwen3.8 is the default/primary model again, Qwen3.6 is now the rollback** (2026-09-09, reverting the

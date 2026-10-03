@@ -161,7 +161,8 @@ increase --gpu-memory-utilization to 0.4159.
 **Why this happened**: `docker-compose.qwen3.8.yml` initially carried `--gpu-memory-utilization 0.4` over from
 qwen3.6 by analogy — untested for this model. On real first boot it left literally zero room for KV cache after
 weights (~22.13 GiB) and CUDA-graph memory profiling, which for this checkpoint includes profiling the vision
-encoder/multimodal path (qwen3.6's text-only checkpoint never had to account for this).
+encoder/multimodal path. (An earlier version of this note said qwen3.6 is text-only and skips that profiling — it
+isn't; qwen3.6 also has a vision encoder. The larger dense weights are the more likely difference.)
 
 **Solution**:
 

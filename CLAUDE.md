@@ -155,7 +155,7 @@ Each compose file pins a different vLLM image — do not swap these:
 | Alias | Backend | Purpose |
 |-------|---------|---------|
 | `qwen3.8-27b` | Qwen3.8-27B-NVFP4 (nvidia) | **Default.** Vision-capable, direct access (262K context) |
-| `qwen3.6-35b-a3b` | Qwen3.6-35B-A3B-NVFP4 | Rollback — only reachable if `docker-compose.qwen3.6.yml` is running; see note above |
+| `qwen3.6-35b-a3b` | Qwen3.6-35B-A3B-NVFP4 | Rollback. Vision-capable — only reachable if `docker-compose.qwen3.6.yml` is running; see note above |
 | `qwen3-coder-next` | Qwen3-Coder-Next-FP8 | 80B MoE coder (262K context) |
 | `nemotron-super` | Nemotron-3-Super-120B | General reasoning (262K context) |
 | `nemotron-3-embed-1b-nvfp4` | Nemotron-3-Embed-1B-NVFP4 | Text-only embedding, 2048-dim, NVFP4 (`/v1/embeddings`); requires manual `query:`/`passage:` input prefix |

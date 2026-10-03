@@ -98,7 +98,10 @@ model_list:
       max_output_tokens: 262144
       supports_tool_choice: true
       supports_function_calling: true
-      supports_vision: false
+      # Vision-capable (2026-10-03): the checkpoint is Qwen3_5MoeForConditionalGeneration
+      # with a vision_config, and the engine loads the encoder (--mm-encoder-tp-mode data).
+      # Was wrongly `false` since v1.3.0, which made clients strip images before sending.
+      supports_vision: true
       input_cost_per_token: 0.000000015
       output_cost_per_token: 0.000000035
 
