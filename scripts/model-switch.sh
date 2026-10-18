@@ -247,7 +247,7 @@ show_help() {
     echo ""
     echo "Models:"
     echo "  qwen3.8   — Qwen3.8-27B-NVFP4 (default, 27B dense, vision-enabled)"
-    echo "  qwen3.6   — Qwen3.6-35B-A3B-NVFP4 (rollback, 35B MoE 3B activated, text-only)"
+    echo "  qwen3.6   — Qwen3.6-35B-A3B-NVFP4 (rollback, 35B MoE 3B activated, vision-capable)"
     echo "  qwen      — Qwen3-Coder-Next-FP8 (80B total, FP8 quant)"
     echo "  nemotron  — Nemotron-3-Super-120B-A12B-NVFP4 (NVFP4 quant)"
     echo ""

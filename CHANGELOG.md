@@ -4,8 +4,63 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`qwen3.8-27b-nothink` LiteLLM alias** (2026-10-11). Same engine and weights as `qwen3.8-27b`, with
+  `extra_body.chat_template_kwargs.enable_thinking: false` on every request, so qwen3.8 skips its reasoning pass.
+  For template-filling/data-to-text work and agent subagents — Goose picks it up via
+  `GOOSE_SUBAGENT_MODEL: qwen3.8-27b-nothink` (verified in goose `summon.rs` `resolve_model_config()`: recipe
+  `settings.goose_model` > env `GOOSE_SUBAGENT_MODEL` > delegate `model` param > config `GOOSE_SUBAGENT_MODEL` >
+  parent model). Motivation: a 9-game report task with 3 Goose subagents spent most of its output on reasoning
+  (5.4–12K tokens per subagent in round 1). `/no_think` in the prompt does not work on this checkpoint (tested:
+  reasoning still emitted); the kwarg does. Langfuse logs it as `openai/qwen3.8-27b`, same price definition.
+
+### Fixed
+
+- **qwen3.8-27b electricity prices re-derived from 42 h of logs** (2026-10-10). `input_cost_per_token` 1e-9 →
+  1.2e-10, `output_cost_per_token` 1.3e-7 → 1.4e-7 in `litellm-config.yaml`, and the Langfuse `dgx-spark` model
+  definition replaced to match (`cmv08c7430002pj07uz1gxlpg` → `cmv2s7old000apj07jlh6hol6`, same pattern). Measured
+  over 240 requests / 15.6M input / 200K output tokens: 1.68 J per output token at ~39 W → 1.39e-7; counted input
+  1.18e-10 (prefix-cache hits). Stable across 17 min, 4 h and 38 h windows. The previous input price made Langfuse
+  report ~1.6× the measured cost ($0.0414 vs ~$0.026 for the 42 h).
+- **Agent requests logged to Langfuse with $0 cost** (2026-10-09). The `langfuse_otel` callback tagged every
+  request that carried a `tools` list — i.e. every agent turn from Goose/OpenCode/Cline — as
+  `openinference.span.kind=TOOL` with no `llm.model_name`, so Langfuse stored it as a TOOL observation, couldn't
+  match the `qwen3.8-27b` price, and recorded $0 (13,823 TOOL vs 12,334 GENERATION observations in `dgx-spark`;
+  usage counts were correct, cost was not). Switched `litellm-config.yaml` to the native Langfuse SDK callback
+  (`success_callback`/`failure_callback: ["langfuse"]`, langfuse SDK 2.59.7 in the image), which always logs a
+  GENERATION with model, usage and LiteLLM's `response_cost`. Added `LANGFUSE_TRACING_ENVIRONMENT: production`
+  to the `litellm` service in all four compose files: the native SDK otherwise logs to Langfuse's `default`
+  environment, while all earlier OTEL data is in `production`. New observations are named `openai/qwen3.8-27b`
+  (the LiteLLM-internal model), old ones `qwen3.8-27b`. Existing $0 observations are not backfilled: Langfuse's
+  ingestion API replaces (not merges) an observation, and `type` is in the ClickHouse sorting key
+  (`project_id, type, toDate(start_time), id`), so a TOOL→GENERATION update leaves a duplicate row.
+- **qwen3.8-27b cost now reflects electricity** (2026-10-09). `input_cost_per_token` 1.5e-8 → 1e-9,
+  `output_cost_per_token` 3.5e-8 → 1.3e-7, from ~35 min of `~/power-logs` data (GPU-only `nvidia-smi` draw ×
+  29.8¢/kWh all-in): ~1.5-1.65 J per output token at ~38 W; counted input tokens are mostly vLLM prefix-cache
+  hits. Preliminary — re-derive after a few days of logs. The Langfuse `dgx-spark` model definition was replaced
+  to match (old `cmt6c0ei20001uk07qdtgbix9`, 1.5e-8/3.5e-8, `^(qwen3.8-27b)$` → new
+  `cmv08c7430002pj07uz1gxlpg`, 1e-9/1.3e-7, `(?i)^(openai/)?(qwen3.8-27b)$`), since the native callback logs the
+  model as `openai/qwen3.8-27b`. Langfuse rejects a second definition with the same name, so it was delete+create.
+- **Qwen3.6 image input rejected ("model doesn't support vision")** (2026-10-03). `litellm-config.yaml` had
+  `supports_vision: false` on `qwen3.6-35b-a3b`, so clients that read LiteLLM's model info (Cline, OpenCode, Claude
+  Code) left images out of requests and the model answered that it couldn't see images. The vLLM engine was never
+  the problem: `nvidia/Qwen3.6-35B-A3B-NVFP4` is `Qwen3_5MoeForConditionalGeneration` with a `vision_config`, and
+  `--mm-encoder-tp-mode data` already loads the encoder. The flag dates from v1.3.0, when the Qwen3.6-27B-FP8 →
+  35B-A3B-NVFP4 swap marked the new checkpoint "text-only" without checking. Set to `true`, and corrected the
+  "text-only" claims in `docs/models.md`, `docs/architecture.md`, `docs/troubleshooting.md`,
+  `docker-compose.qwen3.8.yml` comments and the `restart.sh` / `model-switch.sh` help text. Older CHANGELOG entries
+  are left as written.
+
 ### Changed
 
+- **qwen3.8 `--gpu-memory-utilization` 0.6 → 0.54 (KV-cache right-sizing)** (2026-10-18). At 0.6 the KV
+  cache held 45.37 GiB = 1,279,965 tokens (4.88× of 262,144), but `--max-num-seqs 4` can only ever use
+  4 × 262,144 = 1,048,576 tokens. After the change: KV cache 41.62 GiB = 1,174,522 tokens, startup reports
+  maximum concurrency **4.48×** for 262,144 tokens (still ≥ 4, no capability lost), engine process 73.2 → 67.2 GB.
+  Frees ~6 GB of unified memory so the `local-image-gen-mcp` image server (int8, ~18.5 GB weights) runs
+  alongside with more headroom. Applied by recreating only the engine (`docker compose -f
+  docker-compose.qwen3.8.yml up -d --no-deps qwen3-8-27b-nvfp4-engine`); rationale is in the compose comment.
 - **Qwen3.8 is the default/primary model again, Qwen3.6 is now the rollback** (2026-09-09, reverting the
   2026-08-24 fallback to qwen3.6 — explicit user decision). Driven by two findings from the same-day checkpoint
   swap `Inferact/Qwen3.8-27B-NVFP4` → `nvidia/Qwen3.8-27B-NVFP4` (see `docker-compose.qwen3.8.yml`'s CHECKPOINT

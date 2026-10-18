@@ -80,8 +80,40 @@ model_list:
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: true
-      input_cost_per_token: 0.000000015
-      output_cost_per_token: 0.000000035
+      # Electricity cost (~/power-logs, GPU-only nvidia-smi draw × PSEG all-in
+      # 29.8¢/kWh). 2026-10-10, from 42 h / 240 requests: decode 1.68 J/token
+      # at ~39 W → 1.39e-7/output token; counted input tokens are mostly vLLM
+      # prefix-cache hits → 1.18e-10/input token. Stable across 17 min, 4 h and
+      # 38 h windows. History: 1.5e-8/3.5e-8 → 1e-9/1.3e-7 (2026-10-09) → this.
+      # Re-derive with ~/.claude/skills/llm-power-cost/scripts/power_cost.py.
+      input_cost_per_token: 0.00000000012
+      output_cost_per_token: 0.00000014
+
+  # ── No-thinking alias for qwen3.8 (2026-10-11) ──────────────────────────────
+  # Same engine/weights as qwen3.8-27b, but every request gets
+  # chat_template_kwargs.enable_thinking=false, so no reasoning pass. For
+  # template-filling / data-to-text work and agent subagents (Goose:
+  # GOOSE_SUBAGENT_MODEL: qwen3.8-27b-nothink). "/no_think" in the prompt does
+  # NOT work on this checkpoint (tested: reasoning still emitted); this kwarg
+  # does (test summary: 148 → 52 output tokens, 0 reasoning). Langfuse logs it
+  # as openai/qwen3.8-27b like the main alias, so the same price applies.
+  - model_name: qwen3.8-27b-nothink
+    litellm_params:
+      model: openai/qwen3.8-27b
+      api_base: http://qwen3-8-27b-nvfp4-engine:8000/v1
+      api_key: "none"
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+    model_info:
+      max_tokens: 262144
+      max_input_tokens: 262144
+      max_output_tokens: 262144
+      supports_tool_choice: true
+      supports_function_calling: true
+      supports_vision: true
+      input_cost_per_token: 0.00000000012
+      output_cost_per_token: 0.00000014
 
   # ── Rollback alias: nvidia/Qwen3.6-35B-A3B-NVFP4 ────────────────────────────
   # Only reachable if docker-compose.qwen3.6.yml is brought up instead of
@@ -98,7 +130,10 @@ model_list:
       max_output_tokens: 262144
       supports_tool_choice: true
       supports_function_calling: true
-      supports_vision: false
+      # Vision-capable (2026-10-03): the checkpoint is Qwen3_5MoeForConditionalGeneration
+      # with a vision_config, and the engine loads the encoder (--mm-encoder-tp-mode data).
+      # Was wrongly `false` since v1.3.0, which made clients strip images before sending.
+      supports_vision: true
       input_cost_per_token: 0.000000015
       output_cost_per_token: 0.000000035
 
@@ -164,7 +199,16 @@ litellm_settings:
   # blocks with type "input_text"/"output_text" to "text" before litellm's
   # own translation silently drops them (see litellm-callbacks/ and
   # CHANGELOG.md — matches https://github.com/BerriAI/litellm/issues/23841).
-  callbacks: ["langfuse_otel", "anthropic_input_text_fix.proxy_handler_instance"]
+  callbacks: ["anthropic_input_text_fix.proxy_handler_instance"]
+  # Native Langfuse SDK callback instead of "langfuse_otel" (2026-10-09).
+  # langfuse_otel tagged every request that carried a tools list (i.e. every
+  # agent turn from Goose/OpenCode/Cline) as openinference.span.kind=TOOL with
+  # no llm.model_name, so Langfuse stored it as a TOOL observation, couldn't
+  # match a model price, and recorded $0 — 13,823 of ~26k requests had no
+  # cost. The native callback always logs a GENERATION with model + usage +
+  # LiteLLM's response_cost. Uses LANGFUSE_HOST / _PUBLIC_KEY / _SECRET_KEY.
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
 
   # Redis exact-match prompt cache
   # ttl=3600: cached responses expire after 1 hour.

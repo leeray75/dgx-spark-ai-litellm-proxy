@@ -22,7 +22,7 @@ This guide compares the supported LLMs for the **NVIDIA DGX Spark (Blackwell GB1
 
 #### Key Features
 
-- **Vision-capable**: has a vision encoder, unlike qwen3.6's text-only checkpoint
+- **Vision-capable**: has a vision encoder (qwen3.6 has one too — see its section)
 - **Dense architecture**: no MoE routing — simpler kernel selection, no `moe_backend` config needed
 - **Same ModelOpt quantization scheme as qwen3.6**, but vLLM auto-selects the NATIVE
   `FlashInferCutlassNvFp4LinearKernel` for this checkpoint rather than Marlin (unlike qwen3.6, which uses
@@ -61,7 +61,7 @@ crash/throughput history) is in `docker-compose.qwen3.8.yml`'s header.
   deliberate trade the user chose to accept. The real 6-hour live test now confirms that cost is a genuine ~2x,
   not the narrower ~1.6-1.8x earlier synthetic-vs-live comparisons suggested — the user is sticking with the
   accuracy-over-speed call regardless
-- Vision-assisted coding tasks (screenshots, diagrams) — the only stack of the two with a vision encoder
+- Vision-assisted coding tasks (screenshots, diagrams) — both qwen stacks support images
 - Coding tasks with Cline/Claude Code where the accuracy gain matters more than raw tok/s
 
 ---
@@ -78,7 +78,7 @@ practice (see `docker-compose.qwen3.6.yml`'s header and CHANGELOG.md).
 | **Provider** | NVIDIA |
 | **Total Parameters** | 35B |
 | **Active Parameters** | 3B (MoE) |
-| **Architecture** | Hybrid Attention + MoE |
+| **Architecture** | Hybrid Attention + MoE, with vision encoder (`Qwen3_5MoeForConditionalGeneration`) |
 | **Quantization** | NVFP4 (NVIDIA 4-bit) |
 | **Context Window** | 262K tokens (configurable, 131K default in LiteLLM) |
 | **VRAM Required** | ~26 GB (weights) |
@@ -90,7 +90,9 @@ practice (see `docker-compose.qwen3.6.yml`'s header and CHANGELOG.md).
 
 - **NVFP4 Quantization**: 4-bit weights with NVIDIA-optimized kernel
 - **MoE Architecture**: 35B total, 3B activated per token — efficient inference
-- **Text-Only**: No vision encoder; all memory available for KV cache
+- **Vision-capable**: ships a vision encoder (`vision_config` in the checkpoint's `config.json`), loaded with
+  `--mm-encoder-tp-mode data`; `supports_vision: true` in `litellm-config.yaml` (corrected 2026-10-03 — it was
+  wrongly documented as text-only from v1.3.0 on)
 - **Native Reasoning**: `--reasoning-parser qwen3` prevents thinking tokens in output
 - **Native Tool Calling**: `--tool-call-parser qwen3_xml` (matches the official vLLM recipe, confirmed 2026-09-02
   against a freshly-pasted copy of the recipe's exact command — this flag flip-flopped repeatedly before that;
@@ -219,7 +221,7 @@ practice (see `docker-compose.qwen3.6.yml`'s header and CHANGELOG.md).
 | **Model Type** | 27B dense | 35B MoE (3B active) | 80B MoE (3B active) | 120B MoE (12B active) | 1.14B text encoder |
 | **Quantization** | NVFP4+FP8 (compressed-tensors) | NVFP4 (ModelOpt) | FP8 | NVFP4 | NVFP4 |
 | **Output Format** | Standard JSON | Standard JSON | Standard JSON | Reasoning blocks | 2048-dim vector |
-| **Vision** | ✅ Yes | ❌ No | ❌ No | ❌ No | ❌ No |
+| **Vision** | ✅ Yes | ✅ Yes | ❌ No | ❌ No | ❌ No |
 | **Tool Calling** | Native (qwen3_coder, unverified) | Native (qwen3_xml) | Native (qwen3_coder) | Requires parser | N/A |
 | **Best For** | Coding (Cline/Claude Code), default | Coding (rollback) | Coding tasks | General reasoning | Embeddings/RAG |
 | **Runs Concurrently** | ❌ | ❌ | ❌ | ❌ | ✅ Yes |
@@ -430,8 +432,6 @@ nemotron-embed-engine:
 - You're doing **coding tasks** with Cline/Claude Code and want the **better accuracy** — NVIDIA's own published
   benchmarks show qwen3.8 ahead of qwen3.6 on every overlapping metric (GPQA Diamond, AA-LCR, SciCode, IFBench —
   see Accuracy Benchmarks above)
-- You specifically need **vision support** (screenshots, diagrams) — the only stack of the two with a vision
-  encoder
 - You can accept the confirmed throughput trade: a real 6-hour/221-sample live test measured **20.4 tok/s
   median (20.26 mean)**, roughly **~2x slower** than qwen3.6's informal ~40-45 tok/s live estimate (qwen3.6's
   often-cited ~83-84 tok/s is a synthetic single-request number, not representative of live use)

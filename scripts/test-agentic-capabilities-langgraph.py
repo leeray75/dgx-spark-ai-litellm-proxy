@@ -47,47 +47,142 @@ RECURSION_LIMIT = 15
 
 
 # =============================================================================
-# Synthetic tools — deterministic fake implementations. The point isn't real
-# file I/O, it's verifying the MODEL picks the right tool with correct
-# arguments, and that LangGraph's real loop carries a tool's return value
-# into the next turn correctly.
+# Synthetic tools — deterministic fake implementations of a small, internally
+# CONSISTENT fake codebase. The point isn't real file I/O, it's verifying the
+# MODEL picks the right tool with correct arguments and that LangGraph's real
+# loop carries a tool's return value into the next turn correctly.
+#
+# IMPORTANT: every result below is deliberately realistic and cross-consistent
+# (a search match's file/line/snippet always matches what read_file returns
+# for that same path, and what execute_command's grep/find output shows). An
+# earlier version of this script returned generic placeholders like
+# '"# match for {query}"' or '"(synthetic output)"' — a careful model has good
+# reason to distrust a result that looks like a canned stub rather than real
+# code, and that's exactly what triggered a 28-step retry spiral in testing
+# (the model correctly noticing the tool output didn't look real, not the
+# model "overthinking" a clean task). Keep every new fixture below equally
+# realistic and internally consistent, or this confound comes back.
 # =============================================================================
+
+_FAKE_FILES = {
+    "src/components/TodoList.jsx": (
+        "import React, { Component } from 'react';\n\n"
+        "export class TodoList extends Component {\n"
+        "  render() {\n"
+        "    return <ul>{this.props.items.map(i => <li key={i.id}>{i.text}</li>)}</ul>;\n"
+        "  }\n"
+        "}\n"
+    ),
+    "src/components/LoginForm.jsx": (
+        "import React, { useState } from 'react';\n\n"
+        "export function LoginForm({ onLogin }) {\n"
+        "  const [email, setEmail] = useState('');\n"
+        "  const [password, setPassword] = useState('');\n\n"
+        "  const handleSubmit = (e) => {\n"
+        "    e.preventDefault();\n"
+        "    onLogin({ email, password });\n"
+        "  };\n\n"
+        "  return (\n"
+        "    <form onSubmit={handleSubmit}>\n"
+        "      <input value={email} onChange={e => setEmail(e.target.value)} />\n"
+        "      <input type=\"password\" value={password} onChange={e => setPassword(e.target.value)} />\n"
+        "      <button type=\"submit\">Log in</button>\n"
+        "    </form>\n"
+        "  );\n"
+        "}\n"
+    ),
+    "package.json": json.dumps({"name": "demo-app", "version": "1.0.0", "scripts": {"test": "jest"}}, indent=2),
+    "src/app.py": (
+        "from flask import Flask\n\n"
+        "app = Flask(__name__)\n\n"
+        "@app.route('/')\n"
+        "def index():\n"
+        "    return 'Hello, world!'\n\n"
+        "if __name__ == '__main__':\n"
+        "    app.run(port=5000)\n"
+    ),
+}
+
 
 @tool
 def search_code(query: str, path: str = "") -> str:
     """Search the codebase for a symbol, function, or text pattern."""
-    if "todolist" in query.lower():
+    q = query.lower()
+    if "todolist" in q:
         return json.dumps({"matches": [
-            {"file": "src/components/TodoList.jsx", "line": 12,
-             "snippet": "export class TodoList extends Component {"}
+            {"file": "src/components/TodoList.jsx", "line": 3,
+             "snippet": "export class TodoList extends Component {"},
         ]})
-    return json.dumps({"matches": [{"file": "src/misc.py", "line": 1, "snippet": f"# match for {query}"}]})
+    if "handlesubmit" in q or "submit" in q:
+        return json.dumps({"matches": [
+            {"file": "src/components/LoginForm.jsx", "line": 8,
+             "snippet": "  const handleSubmit = (e) => {"},
+            {"file": "src/components/LoginForm.jsx", "line": 15,
+             "snippet": "    <form onSubmit={handleSubmit}>"},
+        ]})
+    return json.dumps({"matches": [], "note": f"No matches found for {query!r}."})
 
 
 @tool
 def read_file(path: str) -> str:
     """Read the contents of a file at the given path."""
-    if "TodoList" in path:
-        return ("export class TodoList extends Component {\n"
-                "  render() { return <ul>{this.props.items.map(i => <li>{i}</li>)}</ul>; }\n"
-                "}")
-    if "package.json" in path:
-        return json.dumps({"name": "demo-app", "version": "1.0.0", "scripts": {"test": "jest"}})
-    return f"// synthetic contents of {path}\nconsole.log('hello');"
+    for known_path, content in _FAKE_FILES.items():
+        if known_path in path or path in known_path:
+            return content
+    return f"cat: {path}: No such file or directory"
 
 
 @tool
 def write_file(path: str, content: str) -> str:
-    """Write or overwrite a file with the given content."""
+    """Create a NEW file, or overwrite an EXISTING file, with the given full
+    content. This is the correct tool any time the task is to create or
+    rewrite a file. Do not use execute_command with shell redirection
+    (echo/cat/heredoc) for file creation or edits — use this tool instead."""
     return f"Wrote {len(content)} bytes to {path}"
 
 
 @tool
 def execute_command(command: str) -> str:
-    """Execute a shell command and return its output."""
-    if "test" in command.lower():
+    """Run a shell command — for things like running tests, builds, git
+    operations, or search utilities (grep/find/ls). Do NOT use this to
+    create or edit files; use write_file or read_file for file operations."""
+    c = command.lower()
+
+    # Order matters: check the most specific patterns first.
+    if "grep" in c and ("handlesubmit" in c or "submit" in c):
+        return ("src/components/LoginForm.jsx:8:  const handleSubmit = (e) => {\n"
+                "src/components/LoginForm.jsx:15:    <form onSubmit={handleSubmit}>")
+    if "grep" in c:
+        return ""  # realistic: grep with no matches produces no output, not an error
+
+    if "cat " in c:
+        for known_path, content in _FAKE_FILES.items():
+            if known_path.split("/")[-1] in c or known_path in c:
+                return content
+
+    if "npm test" in c or "jest" in c or ("test" in c and "npm" in c):
         return "PASS  12 tests, 0 failures"
-    return f"$ {command}\n(synthetic output)"
+
+    if any(v in c for v in ("--version", "node -v", "npm -v")):
+        if "node" in c:
+            return "v22.11.0"
+        if "npm" in c:
+            return "10.9.0"
+        return "v22.11.0"
+    if c.startswith("which ") or " which " in c:
+        if "node" in c:
+            return "/usr/local/bin/node"
+        if "npm" in c:
+            return "/usr/local/bin/npm"
+        return "/usr/local/bin/" + command.split()[-1]
+
+    if c.strip() == "pwd" or c.startswith("pwd"):
+        return "/home/user/demo-app"
+
+    if any(v in c for v in ("ls", "find", "tree", "dir")):
+        return "\n".join(sorted(_FAKE_FILES.keys()))
+
+    return "(command completed with no output)"
 
 
 TOOLS = [search_code, read_file, write_file, execute_command]
@@ -104,7 +199,9 @@ def load_api_key_from_env_file(project_dir):
     for line in env_path.read_text().splitlines():
         line = line.strip()
         if line.startswith("LITELLM_MASTER_KEY="):
-            return line.split("=", 1)[1].strip()
+            value = line.split("=", 1)[1]
+            value = value.split("#", 1)[0]  # strip inline comment
+            return value.strip()
     return None
 
 
@@ -185,7 +282,7 @@ def test_single_tool_call(agent):
         if not calls or calls[0]["name"] != "read_file":
             return "Single tool call", "FAIL", f"Expected read_file first, got: {calls}"
         answer = final_answer(messages) or ""
-        if "console.log" in answer or "hello" in answer.lower():
+        if "flask" in answer.lower() or "hello" in answer.lower():
             return "Single tool call", "PASS", f"call={calls[0]}, final answer reflects tool result: {answer[:80]!r}"
         return "Single tool call", "WARN", f"Tool called correctly ({calls[0]}) but final answer doesn't clearly use its result: {answer[:80]!r}"
     except Exception as e:

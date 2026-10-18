@@ -1,0 +1,60 @@
+{
+  "model": "qwen3.8-27b",
+  "base_url": "http://localhost:4000/v1",
+  "timestamp": "2026-09-16T03:02:45",
+  "results": [
+    {
+      "name": "Connectivity",
+      "status": "PASS",
+      "detail": "Got response: '\\n\\npong'",
+      "elapsed_s": 2.46
+    },
+    {
+      "name": "Reasoning presence",
+      "status": "PASS",
+      "detail": "reasoning_tokens=100, correct_answer=True, content_tail='\\n\\n408'",
+      "elapsed_s": 3.56
+    },
+    {
+      "name": "Small-budget reasoning risk",
+      "status": "WARN",
+      "detail": "Known behavior reproduced: max_tokens=20 returned empty content (all tokens spent on reasoning). Not a new bug \u2014 see docker-compose.qwen3.8.yml's SIMPLIFICATION PASS note. Flag this to harness authors if they use small per-call token budgets.",
+      "elapsed_s": 0.8
+    },
+    {
+      "name": "Single tool call",
+      "status": "PASS",
+      "detail": "read_file({'path': 'src/app.py'})",
+      "elapsed_s": 1.85
+    },
+    {
+      "name": "Tool selection breadth (3/4)",
+      "status": "FAIL",
+      "detail": "[OK] Find every place the function `handleSub... -> search_code; [OK] Show me what's in package.json... -> read_file; [X] Create a new file called utils/helpers.j... -> expected write_file, got execute_command; [OK] Run the test suite with npm test... -> execute_command",
+      "elapsed_s": 14.86
+    },
+    {
+      "name": "Multi-turn tool context",
+      "status": "PASS",
+      "detail": "Correctly used prior tool result: read_file({'path': 'src/components/TodoList.jsx'})",
+      "elapsed_s": 3.82
+    },
+    {
+      "name": "No hallucinated tool calls",
+      "status": "PASS",
+      "detail": "Plain-text answer: \"\\n\\nAPI stands for **Application Programming Interface**.\\n\\nIt's a set of definitio\"",
+      "elapsed_s": 6.45
+    },
+    {
+      "name": "Streaming reconstruction",
+      "status": "PASS",
+      "detail": "read_file({'path': 'README.md'}) reassembled correctly from stream",
+      "elapsed_s": 2.18
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 1,
+    "warned": 1
+  }
+}

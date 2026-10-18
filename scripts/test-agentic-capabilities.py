@@ -90,7 +90,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Write or overwrite a file with the given content.",
+            "description": (
+                "Create a NEW file, or overwrite an EXISTING file, with the given full "
+                "content. This is the correct tool any time the task is to create or "
+                "rewrite a file. Do not use execute_command with shell redirection "
+                "(echo/cat/heredoc) for file creation or edits — use this tool instead."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -105,7 +110,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "execute_command",
-            "description": "Execute a shell command and return its output.",
+            "description": (
+                "Run a shell command — for things like running tests, builds, git "
+                "operations, or search utilities (grep/find/ls). Do NOT use this to "
+                "create or edit files; use write_file or read_file for file operations."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -438,7 +447,9 @@ def load_api_key_from_env_file(project_dir):
     for line in env_path.read_text().splitlines():
         line = line.strip()
         if line.startswith("LITELLM_MASTER_KEY="):
-            return line.split("=", 1)[1].strip()
+            value = line.split("=", 1)[1]
+            value = value.split("#", 1)[0]  # strip inline comment
+            return value.strip()
     return None
 
 

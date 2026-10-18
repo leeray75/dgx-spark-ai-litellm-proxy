@@ -153,11 +153,11 @@ All services connect via a Docker bridge network called `ai-bridge`:
 ### Qwen3.6-35B-A3B-NVFP4 (ROLLBACK)
 
 - **Size**: 35B total parameters, 3B active (MoE)
-- **Architecture**: Hybrid Attention + MoE
+- **Architecture**: Hybrid Attention + MoE, with vision encoder
 - **Quantization**: NVFP4 (NVIDIA ModelOpt)
 - **Context**: 262K tokens (131K default in LiteLLM)
 - **GPU Memory**: ~26GB weights (plus KV cache)
-- **Vision Support**: No (text-only)
+- **Vision Support**: Yes (`--mm-encoder-tp-mode data`)
 - **Reasoning**: Native thinking tokens with `--reasoning-parser qwen3`
 - **Special**: `--tool-call-parser qwen3_xml` (matches the official vLLM recipe, confirmed 2026-09-02), `--load-format fastsafetensors`, `--default-chat-template-kwargs '{"enable_thinking":false}'` (2026-09-02 — disables the reasoning pass by default so it can't consume the output token budget on long, multi-requirement tickets)
 

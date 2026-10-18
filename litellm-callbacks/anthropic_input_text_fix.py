@@ -116,7 +116,13 @@ class AnthropicInputTextBlockFix(CustomLogger):
         data: dict,
         call_type: Optional[str] = None,
     ) -> Optional[dict]:
-        _fold_system_role_messages(data)
+        # Only Anthropic /v1/messages lacks a "system" role in `messages`.
+        # On OpenAI /v1/chat/completions, role="system" is valid, and folding
+        # it into a top-level `system` key makes litellm forward it as an
+        # unknown extra_body field that vLLM ignores -- the system prompt is
+        # silently lost.
+        if call_type == "anthropic_messages":
+            _fold_system_role_messages(data)
 
         system = data.get("system")
         if isinstance(system, list):
