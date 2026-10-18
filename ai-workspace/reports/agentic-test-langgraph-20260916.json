@@ -1,0 +1,48 @@
+{
+  "model": "qwen3.8-27b",
+  "base_url": "http://localhost:4000/v1",
+  "timestamp": "2026-09-16T03:04:43",
+  "results": [
+    {
+      "name": "Connectivity",
+      "status": "PASS",
+      "detail": "Got: '\\n\\npong'",
+      "elapsed_s": 5.51
+    },
+    {
+      "name": "Reasoning presence",
+      "status": "WARN",
+      "detail": "No reasoning field surfaced via langchain_openai (correct_answer=True) \u2014 may be a langchain_openai field-mapping gap rather than thinking actually being off; cross-check with the raw-HTTP script's usage.completion_tokens_details.reasoning_tokens.",
+      "elapsed_s": 4.46
+    },
+    {
+      "name": "Single tool call",
+      "status": "PASS",
+      "detail": "call={'name': 'read_file', 'args': {'path': 'src/app.py'}}, final answer reflects tool result: '\\n\\nThe file is named `src/app.py` (a Python extension), but its contents are actu'",
+      "elapsed_s": 7.55
+    },
+    {
+      "name": "Tool selection breadth (2/4)",
+      "status": "FAIL",
+      "detail": "[FAIL] Find every place the function `handleSub... -> GraphRecursionError: Recursion limit of 15 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT; [PASS] Show me what's in package.json... -> read_file; [FAIL] Create a new file called utils/helpers.j... -> execute_command; [PASS] Run the test suite with npm test... -> execute_command",
+      "elapsed_s": 61.46
+    },
+    {
+      "name": "Real multi-step chain",
+      "status": "PASS",
+      "detail": "calls=['search_code', 'read_file'], final answer reflects the file content",
+      "elapsed_s": 16.78
+    },
+    {
+      "name": "No hallucinated tool calls",
+      "status": "PASS",
+      "detail": "Plain-text answer: \"\\n\\nAPI stands for **Application Programming Interface**.\\n\\nIt's a set of definitio\"",
+      "elapsed_s": 4.77
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 1,
+    "warned": 1
+  }
+}

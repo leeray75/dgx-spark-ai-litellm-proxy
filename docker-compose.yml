@@ -403,6 +403,7 @@ services:
       # Container-to-container: use service name, not Tailscale hostname
       LANGFUSE_OTEL_HOST: http://langfuse:3000
       LANGFUSE_HOST: ${LANGFUSE_HOST}                   # External URL — set in .env
+      LANGFUSE_TRACING_ENVIRONMENT: production       # native langfuse callback; matches pre-2026-10-09 OTEL data
       # Redis exact-match prompt cache — short-circuits vLLM for identical requests
       LITELLM_CACHE: "true"
       LITELLM_CACHE_TYPE: "redis"

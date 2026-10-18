@@ -75,7 +75,7 @@ docker compose logs -f <service>   # e.g. litellm, qwen3-6-35b-nvfp4-engine
 
 | File | Purpose |
 |------|---------|
-| `litellm-config.yaml` | LiteLLM model routing, Redis cache, Langfuse OTEL callbacks |
+| `litellm-config.yaml` | LiteLLM model routing, Redis cache, Langfuse callbacks (native SDK) |
 | `docker-compose.yml` | Qwen3-Coder-Next-FP8 stack |
 | `docker-compose.qwen3.8.yml` | Qwen3.8-27B-NVFP4 stack (default — see note above) |
 | `docker-compose.qwen3.6.yml` | Qwen3.6-35B-A3B-NVFP4 stack (rollback) |
@@ -89,7 +89,7 @@ docker compose logs -f <service>   # e.g. litellm, qwen3-6-35b-nvfp4-engine
 ```
 Clients → LiteLLM Proxy (4000) → vLLM Engine (8301/8300/8200)
                 ↓
-          Langfuse OTEL → Langfuse Worker → ClickHouse + MinIO
+          Langfuse SDK → Langfuse Worker → ClickHouse + MinIO
                                  ↑
                    Redis (event queue + exact-match prompt cache)
                    PostgreSQL (two isolated DBs: langfuse + litellm)
@@ -109,7 +109,7 @@ These are relationships that require reading multiple files to understand and ar
 
 **Three-way name binding for each model:** The vLLM `--served-model-name` flag sets the model name the engine advertises → `litellm-config.yaml` must reference it as `hosted_vllm/<served-model-name>` → the `api_base` must point to the correct Docker service name. If you add a new engine or rename a model, all three must stay in sync.
 
-**`LANGFUSE_OTEL_HOST: http://langfuse:3000`** uses the container's `container_name: langfuse` (not the service name `langfuse-web`). LiteLLM communicates with Langfuse internally via this name.
+**Langfuse callback is the native SDK (`success_callback: ["langfuse"]`), not `langfuse_otel`** (since 2026-10-09). `langfuse_otel` logs any request carrying a `tools` list as a TOOL observation with no model name, so agent traffic got $0 cost — see CHANGELOG. The native callback sends to `LANGFUSE_HOST` (the Tailscale hostname, reachable from inside the container); `LANGFUSE_OTEL_HOST: http://langfuse:3000` (the container's `container_name: langfuse`, not the service name `langfuse-web`) is only used if `langfuse_otel` is re-enabled.
 
 **`scripts/super_v3_reasoning_parser.py`** is mounted into the Nemotron container as `/app/super_v3_reasoning_parser.py` and activated via `--reasoning-parser-plugin`. **`scripts/qwen3_reasoning_parser.py`** is vestigial — it is not mounted in any compose file; the built-in `--reasoning-parser qwen3` flag is used instead.
 
@@ -155,6 +155,7 @@ Each compose file pins a different vLLM image — do not swap these:
 | Alias | Backend | Purpose |
 |-------|---------|---------|
 | `qwen3.8-27b` | Qwen3.8-27B-NVFP4 (nvidia) | **Default.** Vision-capable, direct access (262K context) |
+| `qwen3.8-27b-nothink` | Qwen3.8-27B-NVFP4 (nvidia), same engine | `enable_thinking: false` via `extra_body` — no reasoning pass; for subagents / template filling (`GOOSE_SUBAGENT_MODEL`). `/no_think` in prompts does not work on this checkpoint |
 | `qwen3.6-35b-a3b` | Qwen3.6-35B-A3B-NVFP4 | Rollback. Vision-capable — only reachable if `docker-compose.qwen3.6.yml` is running; see note above |
 | `qwen3-coder-next` | Qwen3-Coder-Next-FP8 | 80B MoE coder (262K context) |
 | `nemotron-super` | Nemotron-3-Super-120B | General reasoning (262K context) |

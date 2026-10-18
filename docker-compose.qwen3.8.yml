@@ -955,6 +955,13 @@ services:
     #     --max-num-batched-tokens 8192 (not the official 0.85/32/32768):
     #     see the CHECKPOINT SWAP note above — 0.85 caused documented real
     #     swap on this exact box (qwen3.6 corrections item 9).
+    #   - 2026-10-18: 0.6 → 0.54 (KV right-sizing). At 0.6 the KV cache held
+    #     45.37 GiB = 1,279,965 tokens (4.88x of 262,144), but --max-num-seqs 4
+    #     can only ever use 4 x 262,144 = 1,048,576 tokens (~37.2 GiB at
+    #     ~38 KB/token). Non-KV usage ~27.6 GiB, so 0.533 is the minimum; 0.54
+    #     keeps 4 full-length sequences and frees ~7.3 GiB of unified memory for
+    #     the local-image-gen-mcp server (its int8 load needs ~19 GB). Verify the
+    #     startup log still reports "Maximum concurrency ... >= 4.00x".
     #
     # QWEN38_NUM_SPECULATIVE_TOKENS mirrors qwen3.6's own A/B-toggle env var.
     # ---------------------------------------------------------------------------
@@ -966,7 +973,7 @@ services:
       --dtype auto
       --kv-cache-dtype fp8_e4m3
       --tensor-parallel-size 1
-      --gpu-memory-utilization 0.6
+      --gpu-memory-utilization 0.54
       --max-model-len 262144
       --max-num-seqs 4
       --enable-chunked-prefill
@@ -1051,6 +1058,7 @@ services:
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       LANGFUSE_OTEL_HOST: http://langfuse:3000
       LANGFUSE_HOST: ${LANGFUSE_HOST}
+      LANGFUSE_TRACING_ENVIRONMENT: production       # native langfuse callback; matches pre-2026-10-09 OTEL data
       LITELLM_CACHE: "true"
       LITELLM_CACHE_TYPE: "redis"
       REDIS_HOST: redis
