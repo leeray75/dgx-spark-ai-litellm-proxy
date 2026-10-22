@@ -94,18 +94,19 @@ model_list:
       supports_function_calling: true
       supports_vision: true
       # Electricity cost (~/power-logs, GPU-only nvidia-smi draw × PSEG all-in
-      # 29.8¢/kWh), measured 2026-10-22 on this engine (port 8301) from its
-      # healthy time 21:46:35Z to 22:07:59Z: 21 decode intervals / 12,482
-      # output tokens / 56,918 counted input tokens (PROVISIONAL — under 30
-      # intervals and 20,000 output tokens; re-derive after about a day of
-      # real use). Decode 40.9 tok/s at 36.7 W → 0.90 J/token → 7.42e-8 per
-      # output token; counted input 1.26e-9 per token (this window was mostly
-      # fresh test prompts, not the prefix-cache-heavy agent traffic that gave
-      # the 27B 1.2e-10, so expect it to fall). Same price on all three
-      # Flash-Next aliases: Langfuse sees one model, openai/qwen3.8-flash-next.
+      # 29.8¢/kWh), measured 2026-10-22 on this engine (port 8301, 0.75 GPU
+      # memory) over a real Goose agent task, 23:22:29Z – 23:28:45Z: 57 decode
+      # intervals / 14,581 output tokens / 1,467,673 counted input tokens
+      # (mostly prefix-cache hits). Decode 41.6 tok/s at 43.7 W → 1.05 J/token →
+      # 8.69e-8 per output token; counted input 3.19e-11 per token. Still a
+      # little provisional (under 20,000 output tokens); re-derive after a day
+      # of use. First estimate (21:46–22:07Z, test prompts): 1.26e-9 / 7.42e-8,
+      # whose input price made Langfuse report ~2x the measured cost on agent
+      # traffic. Same price on all three Flash-Next aliases: Langfuse sees one
+      # model, openai/qwen3.8-flash-next.
       # Re-derive: python3 -I ~/.claude/skills/llm-power-cost/scripts/power_cost.py --since <ISO time> --rate 0.298
-      input_cost_per_token: 0.00000000126
-      output_cost_per_token: 0.0000000742
+      input_cost_per_token: 0.0000000000319
+      output_cost_per_token: 0.0000000869
 
   # ── No-thinking alias for Flash-Next (2026-10-22) ───────────────────────────
   # Replaces qwen3.8-27b-nothink (user decision U-1). Same engine/weights as
@@ -130,8 +131,8 @@ model_list:
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: true
-      input_cost_per_token: 0.00000000126
-      output_cost_per_token: 0.0000000742
+      input_cost_per_token: 0.0000000000319
+      output_cost_per_token: 0.0000000869
 
   # ── Claude Code discovery alias for Flash-Next (2026-10-22) ─────────────────
   # Claude Code's gateway model discovery (/model) keeps only IDs matching
@@ -151,8 +152,8 @@ model_list:
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: true
-      input_cost_per_token: 0.00000000126
-      output_cost_per_token: 0.0000000742
+      input_cost_per_token: 0.0000000000319
+      output_cost_per_token: 0.0000000869
 
   # ── ROLLBACK: nvidia/Qwen3.8-27B-NVFP4 (retired as default 2026-10-22) ─────
   # Uncomment these two entries (and set default_fallbacks to ["qwen3.8-27b"])

@@ -96,6 +96,14 @@ All notable changes to this project will be documented in this file.
   39 s, ~38 tok/s median in vLLM's log across the tests (27B live median ~21), KV cache 28.03 GiB = 1,491,188
   tokens. `CLAUDE.md`, `README.md` and `docs/{models,architecture,setup,troubleshooting,agents}.md` updated; new
   troubleshooting entries for the startup memory check / cache drop and the stale image-gen network.
+- **Flash-Next electricity prices re-derived from a real agent task** (2026-10-22). `input_cost_per_token`
+  1.26e-9 → **3.19e-11**, `output_cost_per_token` 7.42e-8 → **8.69e-8** on all three Flash-Next aliases, the
+  Langfuse `qwen3.8-flash-next` definition (DELETE + POST; the 27B definition is untouched) and
+  `agentgateway/costs/langfuse-overlay.json`. Source: `power_cost.py` over a Goose task, 23:22:29Z – 23:28:45Z
+  (57 decode intervals, 14,581 output / 1,467,673 counted input tokens): decode 41.6 tok/s at 43.7 W → 1.05 J/output
+  token; input is nearly free because agent context is served from prefix cache. With the old input price Langfuse
+  recorded $0.00285 for the task against a measured $0.00134 (GPU energy, $0.298/kWh). Still slightly provisional
+  (under 20,000 output tokens).
 - **Flash-Next electricity prices** (2026-10-22, **provisional**). `input_cost_per_token` 1.26e-9,
   `output_cost_per_token` 7.42e-8 on all three Flash-Next aliases, from `power_cost.py` over 21:46:35Z – 22:07:59Z
   (0.35 h, 254 samples; **21 decode intervals / 12,482 output tokens**, below the 30-interval / 20,000-token bar):

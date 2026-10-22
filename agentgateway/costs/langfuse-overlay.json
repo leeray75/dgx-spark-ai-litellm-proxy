@@ -86,14 +86,14 @@
       "models": {
         "qwen3.8-flash-next": {
           "rates": {
-            "input": "0.00126",
-            "output": "0.0742"
+            "input": "0.000032",
+            "output": "0.0869"
           }
         },
         "qwen3.8-flash-next-nothink": {
           "rates": {
-            "input": "0.00126",
-            "output": "0.0742"
+            "input": "0.000032",
+            "output": "0.0869"
           }
         }
       }
