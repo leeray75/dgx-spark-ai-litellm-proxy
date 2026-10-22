@@ -4,7 +4,29 @@ This guide compares the supported LLMs for the **NVIDIA DGX Spark (Blackwell GB1
 
 ## Model Overview
 
-### Qwen3.8-27B-NVFP4 (DEFAULT — see throughput/accuracy note below)
+### Qwen3.8-Flash-Next-FP4-Local (DEFAULT since 2026-10-22)
+
+| Attribute | Value |
+|-----------|-------|
+| **Model Name** | Qwen3.8-Flash-Next-FP4-Local |
+| **Provider** | NVIDIA (`nvidia/Qwen3.8-Flash-Next-FP4-Local`) |
+| **Architecture** | `Qwen4ExpForConditionalGeneration`: 125B total / ~6B active MoE (512 experts, 10 routed + 1 shared), 36 Gated DeltaNet + 12 Qwen Sparse Attention layers, 51B n-gram (PLE) embedding table (kept on NVMe), 4B MTP head, vision encoder |
+| **Quantization** | NVFP4 with new `csf` scale encoding (`modelopt_mixed`); upstream vLLM cannot load it |
+| **Model ID** | `nvidia/Qwen3.8-Flash-Next-FP4-Local` (served as `qwen3.8-flash-next`) |
+| **Context Window** | 262,144 tokens native |
+| **Image** | `eugr/spark-vllm-b12x` pinned by digest (b12x kernels), compose file `docker-compose.qwen3.8-flash-next.yml` (run via `scripts/flash-next-compose.sh`) |
+| **Port** | 8301 |
+| **GPU memory** | `--gpu-memory-utilization 0.80` (~97 GiB); model loading 70.32 GiB, KV cache 28.03 GiB = 1,491,188 tokens (5.69x for 262,144-token requests) |
+| **Tool calling / reasoning** | `qwen3_xml` tool parser (verified: proper OpenAI `tool_calls`, streaming included), `qwen3` reasoning parser; `qwen3.8-flash-next-nothink` disables thinking via `chat_template_kwargs.enable_thinking: false` |
+| **Boot** | First boot ≤ 18 m 39 s (b12x JIT compile); needs `MemFree` ≥ ~105 GiB at start (drop caches first); `local-image-gen-mcp` must stay stopped |
+| **Throughput (measured 2026-10-22)** | ~38 tok/s median in vLLM's own log across the Phase 2 tests (max 48.7); 45.5 tok/s direct and 47.7 tok/s via LiteLLM in the 1024-token test (27B live median: ~21 tok/s) |
+| **Electricity cost (provisional)** | 0.90 J/output token at ~36.7 W → $0.0742 per 1M output tokens, $0.00126 per 1M counted input tokens at $0.298/kWh (21 decode intervals / 12,482 output tokens; re-derive after about a day of real use) |
+
+LiteLLM aliases: `qwen3.8-flash-next`, `qwen3.8-flash-next-nothink`, and `claude-qwen3.8-flash-next` (the `claude` prefix is what makes Claude Code's `/model` picker list it). agentgateway (`:4100`) serves the first two. Full facts and test results: `docs/specs/qwen38-flash-next-stack/research.md` (R-2 – R-14).
+
+### Qwen3.8-27B-NVFP4 (ROLLBACK since 2026-10-22; was the default 2026-09-09 – 2026-10-22 — see throughput/accuracy note below)
+
+> **Rollback note (2026-10-22):** the `qwen3.8-27b` and `qwen3.8-27b-nothink` aliases were removed from `litellm-config.yaml` and `agentgateway/config.yaml` (kept as commented ROLLBACK blocks). Uncomment both before `./scripts/model-switch.sh qwen3.8`; the scripts print this warning. Statements below that call this model the "default" describe the 2026-09-09 – 2026-10-22 period.
 
 | Attribute | Value |
 |-----------|-------|
@@ -214,17 +236,17 @@ practice (see `docker-compose.qwen3.6.yml`'s header and CHANGELOG.md).
 
 ## Model Comparison
 
-| Feature | Qwen3.8-27B-NVFP4 | Qwen3.6-35B-A3B-NVFP4 | Qwen3-Coder-Next-FP8 | Nemotron-3-Super-120B | Embedding |
-|---------|-------------------|----------------------|---------------------|----------------------|-----------|
-| **Context** | 262K | 262K (131K default) | 262K | 262K | 4096 |
-| **VRAM (weights)** | ~22 GB | ~26 GB | ~118 GB | ~80 GB | ~1-2 GB |
-| **Model Type** | 27B dense | 35B MoE (3B active) | 80B MoE (3B active) | 120B MoE (12B active) | 1.14B text encoder |
-| **Quantization** | NVFP4+FP8 (compressed-tensors) | NVFP4 (ModelOpt) | FP8 | NVFP4 | NVFP4 |
-| **Output Format** | Standard JSON | Standard JSON | Standard JSON | Reasoning blocks | 2048-dim vector |
-| **Vision** | ✅ Yes | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| **Tool Calling** | Native (qwen3_coder, unverified) | Native (qwen3_xml) | Native (qwen3_coder) | Requires parser | N/A |
-| **Best For** | Coding (Cline/Claude Code), default | Coding (rollback) | Coding tasks | General reasoning | Embeddings/RAG |
-| **Runs Concurrently** | ❌ | ❌ | ❌ | ❌ | ✅ Yes |
+| Feature | Qwen3.8-Flash-Next-FP4-Local (default) | Qwen3.8-27B-NVFP4 (rollback) | Qwen3.6-35B-A3B-NVFP4 | Qwen3-Coder-Next-FP8 | Nemotron-3-Super-120B | Embedding |
+|---------|-----------------------|-------------------|----------------------|---------------------|----------------------|-----------|
+| **Context** | 262K | 262K | 262K (131K default) | 262K | 262K | 4096 |
+| **VRAM (weights)** | ~70 GiB resident (PLE table on NVMe) | ~22 GB | ~26 GB | ~118 GB | ~80 GB | ~1-2 GB |
+| **Model Type** | 125B MoE (~6B active) | 27B dense | 35B MoE (3B active) | 80B MoE (3B active) | 120B MoE (12B active) | 1.14B text encoder |
+| **Quantization** | NVFP4 `csf` (modelopt_mixed) | NVFP4+FP8 (compressed-tensors) | NVFP4 (ModelOpt) | FP8 | NVFP4 | NVFP4 |
+| **Output Format** | Standard JSON | Standard JSON | Standard JSON | Standard JSON | Reasoning blocks | 2048-dim vector |
+| **Vision** | ✅ Yes | ✅ Yes | ✅ Yes | ❌ No | ❌ No | ❌ No |
+| **Tool Calling** | Native (qwen3_xml, verified) | Native (qwen3_coder, unverified) | Native (qwen3_xml) | Native (qwen3_coder) | Requires parser | N/A |
+| **Best For** | Coding (Cline/Claude Code), default | Coding (rollback) | Coding (retired rollback) | Coding tasks | General reasoning | Embeddings/RAG |
+| **Runs Concurrently** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ Yes |
 
 ---
 
@@ -250,7 +272,11 @@ RESULT section and CHANGELOG.md for the full reasoning.
 
 ## Configuration Comparison
 
-### Qwen3.8-27B-NVFP4 (docker-compose.qwen3.8.yml, default)
+### Qwen3.8-Flash-Next-FP4-Local (docker-compose.qwen3.8-flash-next.yml, default)
+
+NVIDIA's DGX Spark recipe, near-verbatim; the authoritative flag list and the deviations (served name, bridge network, named volumes, digest-pinned image, python3 healthcheck; `restart: unless-stopped` since 2026-10-22 — was `"no"`) are in the header of `docker-compose.qwen3.8-flash-next.yml`. Key values: `--quantization modelopt_mixed`, `--load-format b12x`, `--linear-backend b12x`, `--moe-backend b12x`, `--gdn-decode-kernel b12x`, `--kv-cache-dtype fp8`, MTP with 4 speculative tokens, `--max-num-seqs 8`, `--max-num-batched-tokens 4096`, `--reasoning-parser qwen3`, `--tool-call-parser qwen3_xml`, `--gpu-memory-utilization 0.80`.
+
+### Qwen3.8-27B-NVFP4 (docker-compose.qwen3.8.yml, rollback)
 
 ```yaml
 qwen3-8-27b-nvfp4-engine:
@@ -427,7 +453,15 @@ nemotron-embed-engine:
 
 ## Selecting the Right Model
 
-### Choose Qwen3.8-27B-NVFP4 (default) if:
+### Choose Qwen3.8-Flash-Next-FP4-Local (default) if:
+
+- You want the **fastest local chat model on this box**: ~38 tok/s median in the 2026-10-22 tests (45-48 tok/s in single-request runs), about 1.8-2.3x the 27B's live ~21 tok/s, with vision and 262K context
+- You can keep `local-image-gen-mcp` **off** (no memory headroom beside it at 0.80) and accept tight host memory (`MemAvailable` ~7-8 GiB idle) and a ~19-minute cold boot
+
+### Choose Qwen3.8-27B-NVFP4 (rollback) if:
+
+- You need `local-image-gen-mcp` running beside the chat engine (the 27B leaves room for it; Flash-Next does not)
+- Remember to uncomment the ROLLBACK blocks in `litellm-config.yaml` and `agentgateway/config.yaml` first
 
 - You're doing **coding tasks** with Cline/Claude Code and want the **better accuracy** — NVIDIA's own published
   benchmarks show qwen3.8 ahead of qwen3.6 on every overlapping metric (GPQA Diamond, AA-LCR, SciCode, IFBench —
@@ -436,7 +470,7 @@ nemotron-embed-engine:
   median (20.26 mean)**, roughly **~2x slower** than qwen3.6's informal ~40-45 tok/s live estimate (qwen3.6's
   often-cited ~83-84 tok/s is a synthetic single-request number, not representative of live use)
 - Understand this is an explicit, deliberate trade (accuracy over raw speed) — the live test above is now DONE,
-  not pending, and confirms the cost is real; the user is sticking with the accuracy-over-speed call anyway
+  not pending, and confirms the cost is real; the user kept the accuracy-over-speed call until Flash-Next replaced this model as default on 2026-10-22
 
 ### Choose Qwen3.6-35B-A3B-NVFP4 (rollback) if:
 
@@ -473,10 +507,25 @@ nemotron-embed-engine:
 
 ## Testing Models
 
-### Test Qwen3.8-27B-NVFP4 (default)
+### Test Qwen3.8-Flash-Next-FP4-Local (default)
 
 ```bash
-# Switch to Qwen3.8
+# Switch to Flash-Next
+./scripts/model-switch.sh flash
+
+# Test API
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -d '{
+    "model": "qwen3.8-flash-next",
+    "messages": [{"role": "user", "content": "Write a Python function to sort a list."}]
+  }'
+```
+
+### Test Qwen3.8-27B-NVFP4 (rollback)
+
+```bash
+# Restore the ROLLBACK blocks in litellm-config.yaml / agentgateway/config.yaml first
 ./scripts/model-switch.sh qwen3.8
 
 # Test API
@@ -488,7 +537,7 @@ curl http://localhost:4000/v1/chat/completions \
   }'
 ```
 
-### Test Qwen3.6-35B-A3B-NVFP4 (rollback)
+### Test Qwen3.6-35B-A3B-NVFP4 (retired rollback)
 
 ```bash
 # Switch to Qwen3.6

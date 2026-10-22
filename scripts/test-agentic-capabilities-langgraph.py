@@ -26,7 +26,18 @@ Covers:
   6. No hallucinated calls    - a prompt with no matching tool must NOT invent one
 
 Usage:
-    .venv/bin/python3 scripts/test-agentic-capabilities-langgraph.py [--model MODEL] [--output FILE]
+    .venv/bin/python3 scripts/test-agentic-capabilities-langgraph.py [--base-url URL] [--api-key KEY]
+                                                                      [--model MODEL] [--output FILE]
+                                                                      [--max-tokens N]
+
+Examples:
+    # default: LiteLLM at http://localhost:4000/v1, key from LITELLM_MASTER_KEY or .env
+    # default model: qwen3.8-flash-next (Flash-Next, the default stack since 2026-10-22)
+    .venv/bin/python3 scripts/test-agentic-capabilities-langgraph.py
+    # Qwen3.8-27B (ROLLBACK stack; restore the ROLLBACK blocks in litellm-config.yaml first):
+    .venv/bin/python3 scripts/test-agentic-capabilities-langgraph.py --model qwen3.8-27b
+    # ...or directly against the engine (vLLM has no --api-key, any token works):
+    .venv/bin/python3 scripts/test-agentic-capabilities-langgraph.py --base-url http://localhost:8301/v1 --model qwen3.8-flash-next
 """
 
 import argparse
@@ -42,7 +53,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.prebuilt import create_react_agent
 
 DEFAULT_BASE_URL = "http://localhost:4000/v1"
-DEFAULT_MODEL = "qwen3.8-27b"
+DEFAULT_MODEL = "qwen3.8-flash-next"
 RECURSION_LIMIT = 15
 
 

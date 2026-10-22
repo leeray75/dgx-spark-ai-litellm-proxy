@@ -8,7 +8,16 @@
 # health checks / requests until that stack is started — this is the existing
 # design, not something new here.
 #
-# qwen3.8-27b is the PRIMARY/DEFAULT entry as of 2026-09-09
+# 2026-10-22 (Phase 3 of docs/specs/qwen38-flash-next-stack/): the PRIMARY/DEFAULT
+# entry is now qwen3.8-flash-next (docker-compose.qwen3.8-flash-next.yml,
+# nvidia/Qwen3.8-Flash-Next-FP4-Local, port 8301). The qwen3.8-27b and
+# qwen3.8-27b-nothink aliases were REMOVED from the active list (user decision
+# U-1) and kept below as a commented ROLLBACK block; default_fallbacks now
+# targets Flash-Next only. The 27B notes in the rest of this header are
+# history for that rollback stack. To roll back: uncomment the ROLLBACK block
+# and set default_fallbacks to ["qwen3.8-27b"].
+#
+# (history) qwen3.8-27b was the PRIMARY/DEFAULT entry as of 2026-09-09
 # (docker-compose.qwen3.8.yml, port 8301, --served-model-name qwen3.8-27b →
 # openai/qwen3.8-27b). Checkpoint is nvidia/Qwen3.8-27B-NVFP4 (swapped from
 # Inferact's — see docker-compose.qwen3.8.yml's CHECKPOINT SWAP/RESULT
@@ -66,12 +75,16 @@ model_list:
       model: "anthropic/*"
       api_key: os.environ/ANTHROPIC_API_KEY
 
-  # ── Primary chat model: nvidia/Qwen3.8-27B-NVFP4 ────────────────────────────
-  # docker-compose.qwen3.8.yml, port 8301. Full 262K context window.
-  - model_name: qwen3.8-27b
+  # ── Primary chat model: nvidia/Qwen3.8-Flash-Next-FP4-Local (default 2026-10-22) ──
+  # docker-compose.qwen3.8-flash-next.yml, port 8301 (replaces the 27B engine
+  # while that stack is up). MoE, ~6B active of 125B; 262K context, vision.
+  # Became the default stack in Phase 3 of docs/specs/qwen38-flash-next-stack/
+  # (user decision U-4). Measured ~38 tok/s median in vLLM's own log during
+  # the Phase 2 tests (27B: ~21 tok/s live median).
+  - model_name: qwen3.8-flash-next
     litellm_params:
-      model: openai/qwen3.8-27b
-      api_base: http://qwen3-8-27b-nvfp4-engine:8000/v1
+      model: openai/qwen3.8-flash-next
+      api_base: http://qwen3-8-flash-next-fp4-engine:8000/v1
       api_key: "none"
     model_info:
       max_tokens: 262144
@@ -81,26 +94,31 @@ model_list:
       supports_function_calling: true
       supports_vision: true
       # Electricity cost (~/power-logs, GPU-only nvidia-smi draw × PSEG all-in
-      # 29.8¢/kWh). 2026-10-10, from 42 h / 240 requests: decode 1.68 J/token
-      # at ~39 W → 1.39e-7/output token; counted input tokens are mostly vLLM
-      # prefix-cache hits → 1.18e-10/input token. Stable across 17 min, 4 h and
-      # 38 h windows. History: 1.5e-8/3.5e-8 → 1e-9/1.3e-7 (2026-10-09) → this.
-      # Re-derive with ~/.claude/skills/llm-power-cost/scripts/power_cost.py.
-      input_cost_per_token: 0.00000000012
-      output_cost_per_token: 0.00000014
+      # 29.8¢/kWh), measured 2026-10-22 on this engine (port 8301) from its
+      # healthy time 21:46:35Z to 22:07:59Z: 21 decode intervals / 12,482
+      # output tokens / 56,918 counted input tokens (PROVISIONAL — under 30
+      # intervals and 20,000 output tokens; re-derive after about a day of
+      # real use). Decode 40.9 tok/s at 36.7 W → 0.90 J/token → 7.42e-8 per
+      # output token; counted input 1.26e-9 per token (this window was mostly
+      # fresh test prompts, not the prefix-cache-heavy agent traffic that gave
+      # the 27B 1.2e-10, so expect it to fall). Same price on all three
+      # Flash-Next aliases: Langfuse sees one model, openai/qwen3.8-flash-next.
+      # Re-derive: python3 -I ~/.claude/skills/llm-power-cost/scripts/power_cost.py --since <ISO time> --rate 0.298
+      input_cost_per_token: 0.00000000126
+      output_cost_per_token: 0.0000000742
 
-  # ── No-thinking alias for qwen3.8 (2026-10-11) ──────────────────────────────
-  # Same engine/weights as qwen3.8-27b, but every request gets
-  # chat_template_kwargs.enable_thinking=false, so no reasoning pass. For
-  # template-filling / data-to-text work and agent subagents (Goose:
-  # GOOSE_SUBAGENT_MODEL: qwen3.8-27b-nothink). "/no_think" in the prompt does
-  # NOT work on this checkpoint (tested: reasoning still emitted); this kwarg
-  # does (test summary: 148 → 52 output tokens, 0 reasoning). Langfuse logs it
-  # as openai/qwen3.8-27b like the main alias, so the same price applies.
-  - model_name: qwen3.8-27b-nothink
+  # ── No-thinking alias for Flash-Next (2026-10-22) ───────────────────────────
+  # Replaces qwen3.8-27b-nothink (user decision U-1). Same engine/weights as
+  # qwen3.8-flash-next, but every request gets
+  # chat_template_kwargs.enable_thinking=false (the checkpoint's chat template
+  # honors it; research.md R-13), so no reasoning pass. For template-filling /
+  # data-to-text work and agent subagents (Goose: GOOSE_SUBAGENT_MODEL:
+  # qwen3.8-flash-next-nothink). Langfuse logs it as openai/qwen3.8-flash-next
+  # like the main alias, so the same price applies.
+  - model_name: qwen3.8-flash-next-nothink
     litellm_params:
-      model: openai/qwen3.8-27b
-      api_base: http://qwen3-8-27b-nvfp4-engine:8000/v1
+      model: openai/qwen3.8-flash-next
+      api_base: http://qwen3-8-flash-next-fp4-engine:8000/v1
       api_key: "none"
       extra_body:
         chat_template_kwargs:
@@ -112,8 +130,83 @@ model_list:
       supports_tool_choice: true
       supports_function_calling: true
       supports_vision: true
-      input_cost_per_token: 0.00000000012
-      output_cost_per_token: 0.00000014
+      input_cost_per_token: 0.00000000126
+      output_cost_per_token: 0.0000000742
+
+  # ── Claude Code discovery alias for Flash-Next (2026-10-22) ─────────────────
+  # Claude Code's gateway model discovery (/model) keeps only IDs matching
+  # /^(claude|anthropic)/i, so a non-Claude model shows up there only under a
+  # claude-prefixed name. Same backend, params and price as qwen3.8-flash-next.
+  # MUST stay an explicit model_name entry so it wins over the anthropic/*
+  # wildcard above (which would send it to Anthropic's real API).
+  - model_name: claude-qwen3.8-flash-next
+    litellm_params:
+      model: openai/qwen3.8-flash-next
+      api_base: http://qwen3-8-flash-next-fp4-engine:8000/v1
+      api_key: "none"
+    model_info:
+      max_tokens: 262144
+      max_input_tokens: 262144
+      max_output_tokens: 262144
+      supports_tool_choice: true
+      supports_function_calling: true
+      supports_vision: true
+      input_cost_per_token: 0.00000000126
+      output_cost_per_token: 0.0000000742
+
+  # ── ROLLBACK: nvidia/Qwen3.8-27B-NVFP4 (retired as default 2026-10-22) ─────
+  # Uncomment these two entries (and set default_fallbacks to ["qwen3.8-27b"])
+  # before running ./scripts/model-switch.sh qwen3.8 / restart.sh qwen3.8.
+  # The text below is the exact pre-2026-10-22 entry, measured-cost comments
+  # included. Also restore the matching block in agentgateway/config.yaml.
+  # # ── Primary chat model: nvidia/Qwen3.8-27B-NVFP4 ────────────────────────────
+  # # docker-compose.qwen3.8.yml, port 8301. Full 262K context window.
+  # - model_name: qwen3.8-27b
+  #   litellm_params:
+  #     model: openai/qwen3.8-27b
+  #     api_base: http://qwen3-8-27b-nvfp4-engine:8000/v1
+  #     api_key: "none"
+  #   model_info:
+  #     max_tokens: 262144
+  #     max_input_tokens: 262144
+  #     max_output_tokens: 262144
+  #     supports_tool_choice: true
+  #     supports_function_calling: true
+  #     supports_vision: true
+  #     # Electricity cost (~/power-logs, GPU-only nvidia-smi draw × PSEG all-in
+  #     # 29.8¢/kWh). 2026-10-10, from 42 h / 240 requests: decode 1.68 J/token
+  #     # at ~39 W → 1.39e-7/output token; counted input tokens are mostly vLLM
+  #     # prefix-cache hits → 1.18e-10/input token. Stable across 17 min, 4 h and
+  #     # 38 h windows. History: 1.5e-8/3.5e-8 → 1e-9/1.3e-7 (2026-10-09) → this.
+  #     # Re-derive with ~/.claude/skills/llm-power-cost/scripts/power_cost.py.
+  #     input_cost_per_token: 0.00000000012
+  #     output_cost_per_token: 0.00000014
+  #
+  # # ── No-thinking alias for qwen3.8 (2026-10-11) ──────────────────────────────
+  # # Same engine/weights as qwen3.8-27b, but every request gets
+  # # chat_template_kwargs.enable_thinking=false, so no reasoning pass. For
+  # # template-filling / data-to-text work and agent subagents (Goose:
+  # # GOOSE_SUBAGENT_MODEL: qwen3.8-27b-nothink). "/no_think" in the prompt does
+  # # NOT work on this checkpoint (tested: reasoning still emitted); this kwarg
+  # # does (test summary: 148 → 52 output tokens, 0 reasoning). Langfuse logs it
+  # # as openai/qwen3.8-27b like the main alias, so the same price applies.
+  # - model_name: qwen3.8-27b-nothink
+  #   litellm_params:
+  #     model: openai/qwen3.8-27b
+  #     api_base: http://qwen3-8-27b-nvfp4-engine:8000/v1
+  #     api_key: "none"
+  #     extra_body:
+  #       chat_template_kwargs:
+  #         enable_thinking: false
+  #   model_info:
+  #     max_tokens: 262144
+  #     max_input_tokens: 262144
+  #     max_output_tokens: 262144
+  #     supports_tool_choice: true
+  #     supports_function_calling: true
+  #     supports_vision: true
+  #     input_cost_per_token: 0.00000000012
+  #     output_cost_per_token: 0.00000014
 
   # ── Rollback alias: nvidia/Qwen3.6-35B-A3B-NVFP4 ────────────────────────────
   # Only reachable if docker-compose.qwen3.6.yml is brought up instead of
@@ -192,8 +285,10 @@ litellm_settings:
   # Catch-all: if a model group fails (after num_retries) and has no specific
   # entry in `fallbacks`, retry against the local primary engine. Applies to
   # anthropic/* passthrough failures (Anthropic API down/rate-limited) as well
-  # as any other unmapped model group.
-  default_fallbacks: ["qwen3.8-27b"]
+  # as any other unmapped model group. Flash-Next only (user decision U-2,
+  # 2026-10-22); when rolling back to the 27B stack set this to
+  # ["qwen3.8-27b"] together with uncommenting the ROLLBACK block above.
+  default_fallbacks: ["qwen3.8-flash-next"]
   turn_off_message_logging: false
   # anthropic_input_text_fix: normalizes Anthropic /v1/messages content
   # blocks with type "input_text"/"output_text" to "text" before litellm's

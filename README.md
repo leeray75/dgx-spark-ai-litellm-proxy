@@ -1,4 +1,4 @@
-# AI LLM Proxy - Qwen3.6-35B-A3B-NVFP4, Qwen3.8-27B-NVFP4, Qwen3-Coder-Next-FP8 & Nemotron-3-Super-120B
+# AI LLM Proxy - Qwen3.8-Flash-Next-FP4-Local, Qwen3.8-27B-NVFP4, Qwen3.6-35B-A3B-NVFP4, Qwen3-Coder-Next-FP8 & Nemotron-3-Super-120B
 
 An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** with Langfuse v3 observability.
 
@@ -6,7 +6,7 @@ An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** 
 
 ## Features
 
-- **Multi-Model Support**: Switch between Qwen3.8-27B-NVFP4 (default, vision-capable), Qwen3.6-35B-A3B-NVFP4 (rollback — see CHANGELOG.md for the accuracy-vs-throughput trade behind this default), Qwen3-Coder-Next-FP8 (80B), and Nemotron-3-Super-120B (NVFP4)
+- **Multi-Model Support**: Switch between Qwen3.8-Flash-Next-FP4-Local (default since 2026-10-22, vision-capable), Qwen3.8-27B-NVFP4 (rollback), Qwen3.6-35B-A3B-NVFP4 (retired rollback — see CHANGELOG.md), Qwen3-Coder-Next-FP8 (80B), and Nemotron-3-Super-120B (NVFP4)
 - **Text Embedding**: `nemotron-3-embed-1b-nvfp4` (NVFP4-quantized) for text embeddings (2048-dim)
 - **OpenAI-Compatible API**: Drop-in replacement for OpenAI API calls
 - **Langfuse v3 Observability**: Full traceability, cost tracking, and analytics
@@ -73,10 +73,15 @@ An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** 
 
 3. **Start the stack**:
    ```bash
-   # Start with Qwen3.8-27B-NVFP4 (default)
+   # Start with Qwen3.8-Flash-Next-FP4-Local (default) — via the wrapper, which derives
+   # AGW_LANGFUSE_BASIC_AUTH from .env (see docs/setup.md for the preconditions)
+   ./scripts/flash-next-compose.sh up -d
+
+   # Or start with Qwen3.8-27B-NVFP4 (rollback; restore the ROLLBACK blocks in
+   # litellm-config.yaml and agentgateway/config.yaml first)
    docker compose -f docker-compose.qwen3.8.yml up -d
 
-   # Or start with Qwen3.6-35B-A3B-NVFP4 (rollback)
+   # Or start with Qwen3.6-35B-A3B-NVFP4 (retired rollback)
    docker compose -f docker-compose.qwen3.6.yml up -d
 
    # Or start with Qwen3-Coder-Next-FP8
@@ -98,10 +103,13 @@ An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** 
 Switch between models:
 
 ```bash
-# Switch to Qwen3.8-27B-NVFP4 (DEFAULT)
+# Switch to Qwen3.8-Flash-Next-FP4-Local (DEFAULT; aliases: qwen3.8-flash, flash-next)
+./scripts/model-switch.sh flash
+
+# Switch to Qwen3.8-27B-NVFP4 (ROLLBACK — prints a warning about the ROLLBACK config blocks)
 ./scripts/model-switch.sh qwen3.8
 
-# Switch to Qwen3.6-35B-A3B-NVFP4 (ROLLBACK)
+# Switch to Qwen3.6-35B-A3B-NVFP4 (retired rollback)
 ./scripts/model-switch.sh qwen3.6
 
 # Switch to Qwen3-Coder-Next-FP8
@@ -112,6 +120,9 @@ Switch between models:
 
 # Check current status
 ./scripts/model-switch.sh status
+
+# Preview any switch without executing it (prints every mutating command)
+DRY_RUN=1 ./scripts/model-switch.sh flash
 ```
 
 ### restart.sh
@@ -119,13 +130,13 @@ Switch between models:
 Full stack restart with system cache clearing (for NVIDIA DGX Spark Blackwell GB10):
 
 ```bash
-# Restart with Qwen3.8-27B-NVFP4 (default)
+# Restart with Qwen3.8-Flash-Next-FP4-Local (default)
 ./scripts/restart.sh
 
-# Restart with Qwen3.8-27B-NVFP4
+# Restart with Qwen3.8-27B-NVFP4 (rollback)
 ./scripts/restart.sh qwen3.8
 
-# Restart with Qwen3.6-35B-A3B-NVFP4 (rollback)
+# Restart with Qwen3.6-35B-A3B-NVFP4 (retired rollback)
 ./scripts/restart.sh qwen3.6
 
 # Restart with Qwen3-Coder-Next-FP8
@@ -141,7 +152,7 @@ Full stack restart with system cache clearing (for NVIDIA DGX Spark Blackwell GB
 ./scripts/restart.sh clean
 ```
 
-> **Note:** The restart script includes the "Ritual" — clearing system caches via `sudo sync; echo 3 > /proc/sys/vm/drop_caches` — to ensure optimal performance on DGX Spark.
+> **Note:** The restart script includes the "Ritual" — clearing system caches via `sudo sync; echo 3 > /proc/sys/vm/drop_caches` — to ensure optimal performance on DGX Spark. For Flash-Next it is required, not just nice to have: vLLM refuses to start unless `MemFree` is about 105 GiB or more (see `docs/troubleshooting.md`). `model-switch.sh flash` has no cache drop and aborts with the exact command if `MemFree` is too low. `local-image-gen-mcp` stays off while Flash-Next runs.
 
 ## Access Points
 
@@ -150,7 +161,8 @@ Full stack restart with system cache clearing (for NVIDIA DGX Spark Blackwell GB
 | Langfuse UI | http://localhost:3000 | 3000 |
 | LiteLLM API | http://localhost:4000/v1 | 4000 |
 | LiteLLM UI | http://localhost:4000/ui | 4000 |
-| Qwen3.8 Engine (default) / Qwen3.6 Engine (rollback) | http://localhost:8301/v1 | 8301 |
+| Qwen3.8-Flash-Next Engine (default) / Qwen3.8-27B / Qwen3.6 (rollbacks) | http://localhost:8301/v1 | 8301 |
+| agentgateway (trial; part of the Flash-Next stack) | http://localhost:4100/v1 | 4100 |
 | Embedding Engine | http://localhost:8302/v1 | 8302 |
 | Qwen3-Coder Engine | http://localhost:8300/v1 | 8300 |
 | Nemotron Engine | http://localhost:8200/v1 | 8200 |
@@ -161,17 +173,17 @@ Full stack restart with system cache clearing (for NVIDIA DGX Spark Blackwell GB
 ### OpenAI Compatible
 
 ```bash
-# Qwen3.8-27B-NVFP4 (default)
+# Qwen3.8-Flash-Next-FP4-Local (default)
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -d '{
-    "model": "qwen3.8-27b",
+    "model": "qwen3.8-flash-next",
     "messages": [{"role": "user", "content": "Hello!"}],
     "temperature": 0.7
   }'
 
-# Qwen3.6-35B-A3B-NVFP4 (rollback)
+# Qwen3.6-35B-A3B-NVFP4 (retired rollback)
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
@@ -240,17 +252,19 @@ The LiteLLM proxy provides an OpenAI-compatible API and works with many AI agent
 
 | Agent/Tool | API Model | Port | Purpose |
 |------------|-----------|------|---------|
-| Cline Code | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
-| Claude Code | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | CLI AI coding assistant |
-| Cursor IDE | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
-| Continue | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
-| Codeium | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
+| Cline Code | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (retired rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
+| Claude Code | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (retired rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | CLI AI coding assistant |
+| Cursor IDE | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (retired rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
+| Continue | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (retired rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
+| Codeium | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (retired rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
 | OpenWebUI | Direct endpoint | 3000 | Web-based LLM interface |
-| OpenAI SDK | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
+| OpenAI SDK | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (retired rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
 
 **Full documentation:** See [AI Agent Configuration](docs/agents.md) for detailed setup guides.
 
-> **Note:** All agents support the same backend models — Qwen3.8-27B-NVFP4 (default), Qwen3.6-35B-A3B-NVFP4 (rollback — see CHANGELOG.md), Qwen3-Coder-Next-FP8, and Nemotron-3-Super-120B. Only one chat engine runs at a time.
+> **Claude Code:** its `/model` picker only lists IDs starting with `claude`/`anthropic`, so pick `claude-qwen3.8-flash-next` there (same engine).
+>
+> **Note:** All agents support the same backend models — Qwen3.8-Flash-Next-FP4-Local (default; the `qwen3.8-27b` aliases were removed 2026-10-22), Qwen3.6-35B-A3B-NVFP4 (retired rollback — see CHANGELOG.md), Qwen3-Coder-Next-FP8, and Nemotron-3-Super-120B. Only one chat engine runs at a time.
 
 ## Changelog
 

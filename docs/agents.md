@@ -8,17 +8,19 @@ The LiteLLM proxy provides an OpenAI-compatible API, which means it works with a
 
 | Agent/Tool | API Model | Port | Purpose |
 |------------|-----------|------|---------|
-| Cline Code | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
-| Claude Code | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | CLI AI coding assistant |
-| Cursor IDE | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
-| Continue | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
-| Codeium | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
+| Cline Code | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | VS Code AI assistant |
+| Claude Code | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | CLI AI coding assistant |
+| Cursor IDE | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | AI-powered code editor |
+| Continue | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | Open-source AI assistant |
+| Codeium | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | AI coding assistant |
 | OpenWebUI | Direct endpoint | 3000 | Web-based LLM interface |
-| OpenAI SDK | `qwen3.8-27b` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
+| OpenAI SDK | `qwen3.8-flash-next` (default), `qwen3.6-35b-a3b` (rollback), `qwen3-coder-next`, `nemotron-super` | 4000 | Python/JavaScript clients |
 
-> **Note:** The `anthropic/*` wildcard passthrough (added v1.4.0) now routes all Claude model requests directly to Anthropic's real API via the proxy, with a fallback to the local default engine (`qwen3.8-27b`) if the Anthropic API is unavailable. This replaces the older approach of using individual `claude-sonnet-4-6` / `claude-haiku-4-6` proxy aliases (removed in v1.3.0).
+> **Note:** The `anthropic/*` wildcard passthrough (added v1.4.0) now routes all Claude model requests directly to Anthropic's real API via the proxy, with a fallback to the local default engine (`qwen3.8-flash-next`) if the Anthropic API is unavailable. This replaces the older approach of using individual `claude-sonnet-4-6` / `claude-haiku-4-6` proxy aliases (removed in v1.3.0).
 >
-> **Note:** `qwen3.6-35b-a3b` is only reachable if `docker-compose.qwen3.6.yml` is the stack currently running instead of `docker-compose.qwen3.8.yml` — only one chat engine runs at a time. See `docs/models.md` for the full comparison and `CHANGELOG.md` for why qwen3.8 is the default again as of 2026-09-09 (NVIDIA's own published accuracy benchmarks favor qwen3.8 on every overlapping metric). A real 6-hour/221-sample live test has since confirmed qwen3.8's throughput cost: 20.4 tok/s median (20.26 mean), roughly ~2x slower than qwen3.6's informal ~40-45 tok/s live estimate — the earlier ~24.3-24.9 tok/s figure was a synthetic single-request benchmark, not representative of live usage. The user is sticking with the accuracy-over-speed call.
+> **Note (2026-10-22):** Flash-Next (`nvidia/Qwen3.8-Flash-Next-FP4-Local`) is the default stack. The old `qwen3.8-27b` and `qwen3.8-27b-nothink` aliases no longer exist; the 27B aliases are a commented ROLLBACK block in `litellm-config.yaml`. LiteLLM does **not** reject them: `default_fallbacks` serves removed and unknown model names with Flash-Next, thinking ON, echoing the requested name (user decision U-5, intended). So `qwen3.8-27b-nothink` callers silently lose no-think; switch them to `qwen3.8-flash-next-nothink`. agentgateway returns 404 `model_not_found` for those names. `qwen3.8-flash-next-nothink` skips the reasoning pass (use it for subagents and template filling, e.g. `GOOSE_SUBAGENT_MODEL`). Claude Code's `/model` picker only lists IDs that start with `claude`/`anthropic`, so pick `claude-qwen3.8-flash-next` there (it routes to the same engine; `POST /v1/messages` verified). agentgateway (`:4100`, same key) serves `qwen3.8-flash-next` and `qwen3.8-flash-next-nothink`.
+>
+> **Note:** `qwen3.6-35b-a3b` is only reachable if `docker-compose.qwen3.6.yml` is the stack currently running instead of `docker-compose.qwen3.8-flash-next.yml` — only one chat engine runs at a time. See `docs/models.md` for the full comparison and `CHANGELOG.md` for why qwen3.8 was the default from 2026-09-09 (superseded as default by Flash-Next on 2026-10-22) (NVIDIA's own published accuracy benchmarks favor qwen3.8 on every overlapping metric). A real 6-hour/221-sample live test has since confirmed qwen3.8's throughput cost: 20.4 tok/s median (20.26 mean), roughly ~2x slower than qwen3.6's informal ~40-45 tok/s live estimate — the earlier ~24.3-24.9 tok/s figure was a synthetic single-request benchmark, not representative of live usage. (That was the 2026-09-09 – 2026-10-22 call; Flash-Next superseded it as default on 2026-10-22.)
 
 ---
 
@@ -40,7 +42,7 @@ Cline is a VS Code extension that acts as an AI programming assistant, allowing 
 ```json
 {
   "cline.modelConfig": {
-    "model": "qwen3.8-27b",
+    "model": "qwen3.8-flash-next",
     "apiBaseUrl": "http://localhost:4000/v1",
     "apiKey": "sk-your-litellm-master-key",
     "enableClineLogging": true
@@ -77,7 +79,7 @@ Cursor is an AI-powered code editor built on VS Code with integrated LLM capabil
   "cursor.apiProvider": "openai",
   "cursor.openai.baseURL": "http://localhost:4000/v1",
   "cursor.openai.apiKey": "sk-your-litellm-master-key",
-  "cursor.model": "qwen3.8-27b",
+  "cursor.model": "qwen3.8-flash-next",
   "cursor.autoSuggestEnabled": true
 }
 ```
@@ -90,7 +92,7 @@ Cursor allows switching models via the status bar or commands:
 
 | Model | API Model Name | Use Case |
 |-------|---------------|----------|
-| Main (default) | `qwen3.8-27b` | Complex coding tasks, vision-assisted |
+| Main (default) | `qwen3.8-flash-next` | Complex coding tasks, vision-assisted |
 | Main (rollback) | `qwen3.6-35b-a3b` | Complex coding tasks (only if qwen3.6 stack is running) |
 | Nemotron | `nemotron-super` | Reasoning tasks |
 
@@ -114,7 +116,7 @@ from continue_chainlit import *
 
 # Configure the proxy
 configure(
-    model="qwen3.8-27b",
+    model="qwen3.8-flash-next",
     api_base="http://localhost:4000/v1",
     api_key="sk-your-litellm-master-key"
 )
@@ -126,7 +128,7 @@ configure(
    - Enter:
      - **API Base URL**: `http://localhost:4000/v1`
      - **API Key**: `sk-your-litellm-master-key`
-     - **Model**: `qwen3.8-27b`
+     - **Model**: `qwen3.8-flash-next`
 
 ---
 
@@ -191,9 +193,9 @@ client = OpenAI(
     api_key="sk-your-litellm-master-key"
 )
 
-# Qwen3.8-27B-NVFP4 (default)
+# Qwen3.8-Flash-Next-FP4-Local (default)
 response = client.chat.completions.create(
-    model="qwen3.8-27b",
+    model="qwen3.8-flash-next",
     messages=[
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "Write a Python function to sort a list."}
@@ -258,9 +260,9 @@ const client = new OpenAI({
   apiKey: 'sk-your-litellm-master-key'
 });
 
-// Qwen3.8-27B-NVFP4 (default)
+// Qwen3.8-Flash-Next-FP4-Local (default)
 const response = await client.chat.completions.create({
-  model: 'qwen3.8-27b',
+  model: 'qwen3.8-flash-next',
   messages: [
     { role: 'system', content: 'You are a helpful assistant.' },
     { role: 'user', content: 'Write a JavaScript function to sort an array.' }
@@ -307,7 +309,7 @@ OpenWebUI is a self-hosted web interface for interacting with LLMs.
      - **OpenAI API Key**: `sk-your-litellm-master-key`
 
 3. **Select Model**:
-   - Choose `qwen3.8-27b` for main tasks
+   - Choose `qwen3.8-flash-next` for main tasks
    - Choose `qwen3-coder-next` for coding tasks
    - Choose `nemotron-super` for reasoning tasks
 
@@ -319,7 +321,7 @@ OpenWebUI is a self-hosted web interface for interacting with LLMs.
 
 | Model Name | Purpose | Backend Model |
 |------------|---------|---------------|
-| `qwen3.8-27b` | Direct access to Qwen3.8 model (default) | Qwen3.8-27B-NVFP4 |
+| `qwen3.8-flash-next` | Direct access to Qwen3.8 model (default) | Qwen3.8-Flash-Next-FP4-Local |
 | `qwen3.6-35b-a3b` | Direct access to Qwen3.6 model (rollback — only if that stack is running) | Qwen3.6-35B-A3B-NVFP4 |
 | `qwen3-coder-next` | Direct access to Qwen3-Coder model | Qwen3-Coder-Next-FP8 |
 | `nemotron-super` | Direct access to Nemotron model | Nemotron-3-Super-120B |
@@ -330,7 +332,7 @@ OpenWebUI is a self-hosted web interface for interacting with LLMs.
 ```python
 # Python - Switch between models
 models = {
-    'main': 'qwen3.8-27b',
+    'main': 'qwen3.8-flash-next',
     'main_rollback': 'qwen3.6-35b-a3b',
     'qwen': 'qwen3-coder-next',
     'nemotron': 'nemotron-super',
@@ -350,12 +352,12 @@ response = client.chat.completions.create(
 ### Test API Connection
 
 ```bash
-# Test with curl (Qwen3.8-27B-NVFP4)
+# Test with curl (Qwen3.8-Flash-Next-FP4-Local)
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-your-litellm-master-key" \
   -d '{
-    "model": "qwen3.8-27b",
+    "model": "qwen3.8-flash-next",
     "messages": [{"role": "user", "content": "Hello!"}],
     "temperature": 0.7
   }'
@@ -390,10 +392,10 @@ client = OpenAI(
     api_key="sk-your-litellm-master-key"
 )
 
-# Simple health check (Qwen3.8-27B-NVFP4)
+# Simple health check (Qwen3.8-Flash-Next-FP4-Local)
 try:
     response = client.chat.completions.create(
-        model="qwen3.8-27b",
+        model="qwen3.8-flash-next",
         messages=[{"role": "user", "content": "Say 'hello'"}],
         max_tokens=10
     )
@@ -422,5 +424,5 @@ except Exception as e:
 - Ensure the model name is in the list
 
 **4. Slow Responses**
-- Check vLLM engine logs: `docker compose logs qwen3-8-27b-nvfp4-engine` (default) or `qwen3-6-35b-nvfp4-engine` (rollback)
+- Check vLLM engine logs: `./scripts/flash-next-compose.sh logs qwen3-8-flash-next-fp4-engine` (default), `docker compose -f docker-compose.qwen3.8.yml logs qwen3-8-27b-nvfp4-engine` (27B rollback) or `qwen3-6-35b-nvfp4-engine` (retired rollback)
 - Verify GPU is not out of memory: `nvidia-smi`

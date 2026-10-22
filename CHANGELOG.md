@@ -6,6 +6,33 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Qwen3.8-Flash-Next stack: routing, scripts and prices (Phase 3 of `docs/specs/qwen38-flash-next-stack/`)**
+  (2026-10-22). New `qwen3.8-flash-next-nothink` (same `litellm_params` as `qwen3.8-flash-next` plus
+  `extra_body.chat_template_kwargs.enable_thinking: false`, which the checkpoint's chat template honors) and
+  `claude-qwen3.8-flash-next` LiteLLM aliases (explicit `model_name`, so it wins over the `anthropic/*` wildcard;
+  Claude Code's `/model` discovery only lists `claude*`/`anthropic*` IDs; verified with an Anthropic-format
+  `POST /v1/messages`). All three Flash-Next aliases carry measured electricity prices (see *Changed*).
+  agentgateway: provider `vllm-qwen38-flash` → `qwen3-8-flash-next-fp4-engine`, models `qwen3.8-flash-next` and
+  `qwen3.8-flash-next-nothink`. New `scripts/flash-next-compose.sh`: wrapper for
+  `docker-compose.qwen3.8-flash-next.yml` that sources `.env`, derives `AGW_LANGFUSE_BASIC_AUTH`, refuses to run
+  when the Langfuse keys are empty (the `Og==` case) and `exec`s `docker compose`. `restart.sh` and
+  `model-switch.sh` gained a `qwen3.8-flash` target (aliases `flash`, `flash-next`; **now the default**) and a
+  `DRY_RUN=1` mode that prints every mutating command instead of running it. Flash start path: stop
+  `local-image-gen-mcp`, `MemFree` gate (105 GiB; `restart.sh` warns after its cache drop, `model-switch.sh`
+  aborts and prints the exact `sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'`; it can only judge this
+  after the old stack is stopped if an engine is running), `up -d` through the wrapper, 3600 s wait (other targets
+  keep 600 s). `stop_all` also brings down the Flash-Next stack and the standalone agentgateway project. The 27B
+  path prints a prominent ROLLBACK warning, then restores `local-image-gen-mcp` with its compose `up -d` (not
+  `docker start`: stale `ai-bridge` network) and the standalone agentgateway. `status` shows the Flash-Next engine
+  and agentgateway. Langfuse model definition `qwen3.8-flash-next` (pattern `(?i)^(openai/)?(qwen3.8-flash-next)$`,
+  id `cmvk3jw270001mo07qns04r4t`) and the regenerated `agentgateway/costs/langfuse-overlay.json`. Review fixes (same day): `model-switch.sh flash`
+  has a pre-stop page-cache gate (≥ 10 GiB aborts with exit 2 before stopping anything) plus the post-stop `MemFree`
+  gate (exit 3, states that the previous stack is stopped and prints the re-run command); `DRY_RUN` accepts any
+  non-empty value except `0` and prints copy-pasteable (`%q`) commands; both scripts verify after `stop_all` that no
+  engine container or `agentgateway` still runs; the 27B warning lists each item still to restore;
+  `test-agentic-capabilities*.py` default to `qwen3.8-flash-next` and the stdlib script tolerates agentgateway's
+  usage-only stream chunk (`choices: []`).
+
 - **`qwen3.8-27b-nothink` LiteLLM alias** (2026-10-11). Same engine and weights as `qwen3.8-27b`, with
   `extra_body.chat_template_kwargs.enable_thinking: false` on every request, so qwen3.8 skips its reasoning pass.
   For template-filling/data-to-text work and agent subagents — Goose picks it up via
@@ -53,6 +80,33 @@ All notable changes to this project will be documented in this file.
   are left as written.
 
 ### Changed
+
+- **Qwen3.8-Flash-Next-FP4-Local is the default stack; the `qwen3.8-27b` aliases are removed** (2026-10-22,
+  explicit user decisions U-1 – U-4). `qwen3.8-27b` and `qwen3.8-27b-nothink` are gone from `litellm-config.yaml`
+  and `agentgateway/config.yaml`, kept verbatim (with their measured-cost comments) as commented ROLLBACK blocks:
+  uncomment both and set `default_fallbacks` back to `["qwen3.8-27b"]` before running the 27B stack
+  (`docker-compose.qwen3.8.yml`, now the rollback; qwen3.6 is the retired rollback). Clients configured with
+  `qwen3.8-27b` must use `qwen3.8-flash-next` (and `qwen3.8-flash-next-nothink`, e.g. `GOOSE_SUBAGENT_MODEL`).
+  **Behaviour for old names (user decision U-5, intended):** LiteLLM does not return 404 for `qwen3.8-27b`,
+  `qwen3.8-27b-nothink` or any unknown model name; `default_fallbacks` serves them with Flash-Next, thinking ON,
+  echoing the requested name, so `qwen3.8-27b-nothink` callers silently lose no-think until they switch to
+  `qwen3.8-flash-next-nothink`. agentgateway returns 404 `model_not_found`.
+  `default_fallbacks` is `["qwen3.8-flash-next"]` only. `local-image-gen-mcp` stays off while Flash-Next runs
+  (0.80 utilization leaves no room; host `MemAvailable` ~6-8 GiB idle). Measured on this box: first boot ≤ 18 m
+  39 s, ~38 tok/s median in vLLM's log across the tests (27B live median ~21), KV cache 28.03 GiB = 1,491,188
+  tokens. `CLAUDE.md`, `README.md` and `docs/{models,architecture,setup,troubleshooting,agents}.md` updated; new
+  troubleshooting entries for the startup memory check / cache drop and the stale image-gen network.
+- **Flash-Next electricity prices** (2026-10-22, **provisional**). `input_cost_per_token` 1.26e-9,
+  `output_cost_per_token` 7.42e-8 on all three Flash-Next aliases, from `power_cost.py` over 21:46:35Z – 22:07:59Z
+  (0.35 h, 254 samples; **21 decode intervals / 12,482 output tokens**, below the 30-interval / 20,000-token bar):
+  decode 40.9 tok/s at 36.7 W → 0.90 J/output token ($0.0742 per 1M output tokens at $0.298/kWh); counted input
+  1.26e-9 (56,918 tokens, mostly fresh test prompts, so expect it to fall toward the 27B's 1.2e-10 with
+  prefix-cache-heavy agent traffic). Re-derive after about a day of real use. The Langfuse `dgx-spark` definition
+  was created (none existed); the 27B definition `cmv2s7old000apj07jlh6hol6` is untouched.
+- **`model-switch.sh`: `HF_TOKEN` may come from the environment.** `check_env_vars` required a `HF_TOKEN=` line in
+  `.env`, but `.env` only has a comment (the token is exported from `~/.bashrc`), so every target failed with
+  "Missing required variable: HF_TOKEN". A variable already exported in the environment now counts. The `status`
+  output uses `echo -e`, so colors render instead of printing literal `\033[...` text.
 
 - **qwen3.8 `--gpu-memory-utilization` 0.6 → 0.54 (KV-cache right-sizing)** (2026-10-18). At 0.6 the KV
   cache held 45.37 GiB = 1,279,965 tokens (4.88× of 262,144), but `--max-num-seqs 4` can only ever use

@@ -17,14 +17,15 @@ The initial model loading can take 10-60 minutes (first boot includes FlashInfer
 
 ```bash
 # Check container logs
-docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (default)
-docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (rollback)
+./scripts/flash-next-compose.sh logs -f qwen3-8-flash-next-fp4-engine   # Flash-Next (default; first boot up to ~19 min)
+docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8-27B (rollback)
+docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (retired rollback)
 docker compose logs -f nemotron-embed-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine
 
 # Wait for loading to complete
-# The health check has a 3600s start_period for the chat engine (Qwen3.8/Qwen3.6)
+# The health check has a 3600s start_period for the chat engine (Flash-Next/Qwen3.8/Qwen3.6)
 # and 900s start_period for the embedding engine
 ```
 
@@ -59,7 +60,7 @@ docker compose logs litellm
 
 3. Verify the vLLM engine is healthy:
 ```bash
-curl http://localhost:8301/health  # Qwen3.8 (default) or Qwen3.6 (rollback) — whichever stack is running
+curl http://localhost:8301/health  # Flash-Next (default), Qwen3.8-27B or Qwen3.6 — whichever stack is running
 curl http://localhost:8302/health  # For Embedding Engine (Qwen3.8/3.6 stacks)
 curl http://localhost:8300/health  # For Qwen3-Coder
 curl http://localhost:8200/health  # For Nemotron
@@ -198,6 +199,51 @@ build it had never been validated against — reproducing the identical CUDA-gra
    compose file entirely), know that it affects both `docker-compose.qwen3.6.yml` and
    `docker-compose.qwen3.8.yml` simultaneously, since neither is pinned to a digest yet. Re-test both stacks after
    any such pull, not just the one you were originally investigating.
+
+---
+
+### 4c. Flash-Next fails at startup: free memory below the target (startup memory check, cache drop)
+
+**Problem**: The Flash-Next engine (`--gpu-memory-utilization 0.80`) exits at startup with a free-memory error, or `./scripts/model-switch.sh flash` aborts with "MemFree is … GiB, below the 105 GiB".
+
+**Cause**: vLLM refuses to start when free memory is below `gpu-memory-utilization × total` (0.80 × 121.7 GiB ≈ 97 GiB). On GB10 the CUDA free figure tracks `MemFree`, **not** `MemAvailable`, so page cache (for example from downloading the 96 GiB checkpoint) makes it fail even when `MemAvailable` is high. Measured 2026-10-22: after the download and with the 27B stack down, `MemFree` was only 9.7 GiB while `MemAvailable` was 117.6 GiB.
+
+**Solution**:
+
+1. Check: `grep -E 'MemFree|MemAvailable' /proc/meminfo`
+2. Stop everything that holds GPU memory first (`./scripts/restart.sh clean` or the target stack's `down`; `docker stop local-image-gen-mcp` — it holds ~18 GB and Flash-Next at 0.80 cannot share).
+3. Drop the page cache (needs sudo, run it yourself): `sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'`
+4. Re-run `./scripts/restart.sh flash` (does steps 2-3 itself) or `./scripts/model-switch.sh flash`. Preview with `DRY_RUN=1` (any non-empty value other than `0` is a dry run).
+   `model-switch.sh flash` has two gates: a **pre-stop** gate that aborts (exit 2) *before stopping anything* when page cache (Cached+Buffers) is ≥ 10 GiB (121.7 GiB total − 105 GiB needed free − ~5 GiB baseline ≈ 11.7, rounded down; dropping caches while the old stack runs is harmless), and a **post-stop** gate that aborts (exit 3) when `MemFree` is still under 105 GiB after the old stack was stopped. On exit 3 the previous stack is **already stopped and nothing is serving**: the message prints the sudo drop command and the exact re-run command.
+5. Do not lower `--gpu-memory-utilization` as a workaround: 0.70 leaves less KV cache than one 262,144-token sequence (see `docs/specs/qwen38-flash-next-stack/research.md` R-7), and changing it invalidates the compile cache.
+
+---
+
+### 4d. `local-image-gen-mcp` can't reach the network after a stack switch (stale network)
+
+**Problem**: After switching stacks, a stopped `local-image-gen-mcp` fails to start or can't resolve other containers, or agentgateway's `/mcp/image-gen` returns "backends required DNS resolution which failed".
+
+**Cause**: `docker compose … down` removes the `ai-litellm-proxy_ai-bridge` network and the next `up` creates a new one with the same name but a new ID. A stopped `local-image-gen-mcp` still references the old one (observed 2026-10-22: `0f655f48…` vs live `c84d4eac…`). It is also deliberately **off** while Flash-Next runs, so this error is expected there.
+
+**Solution**: bring it back with its own compose `up -d` (not `docker start`), only when the 27B stack (not Flash-Next) is running:
+
+```bash
+cd ~/vscode-workspace/local-image-gen-mcp/docker
+docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
+```
+
+`./scripts/restart.sh qwen3.8` / `./scripts/model-switch.sh qwen3.8` do this automatically after the 27B engine is healthy (and then run `./scripts/agentgateway-up.sh`).
+
+---
+
+### 4e. Requests for `qwen3.8-27b` / `qwen3.8-27b-nothink` (removed aliases) behave unexpectedly
+
+**What happens (user decision U-5, 2026-10-22: intended, documented behaviour)**: since 2026-10-22 the `qwen3.8-27b` / `qwen3.8-27b-nothink` aliases are removed (Flash-Next is the default).
+- **LiteLLM (`:4000`) does not fail.** `default_fallbacks: ["qwen3.8-flash-next"]` also catches removed and unknown model names, so the request returns 200, served by Flash-Next with **thinking ON**, and the response echoes the requested name in `model`. Nothing in the response says a fallback happened (check the Langfuse model name `openai/qwen3.8-flash-next`).
+- **`qwen3.8-27b-nothink` callers silently lose no-think** (reasoning tokens appear, small `max_tokens` budgets can come back empty). Fix the client: use `qwen3.8-flash-next-nothink` (for Goose, `GOOSE_SUBAGENT_MODEL`).
+- **agentgateway (`:4100`) is strict:** 404 `model_not_found` for the same names.
+
+**Solution**: use `qwen3.8-flash-next` / `qwen3.8-flash-next-nothink` (or `claude-qwen3.8-flash-next` in Claude Code) and update client configs. To go back to the 27B, uncomment the ROLLBACK blocks in `litellm-config.yaml` and `agentgateway/config.yaml` before `./scripts/model-switch.sh qwen3.8`.
 
 ---
 
@@ -369,8 +415,9 @@ grep LANGFUSE_SECRET_KEY .env
 docker compose logs -f
 
 # Specific service
-docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8 (default)
-docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (rollback)
+./scripts/flash-next-compose.sh logs -f qwen3-8-flash-next-fp4-engine   # Flash-Next (default)
+docker compose logs -f qwen3-8-27b-nvfp4-engine    # Qwen3.8-27B (rollback)
+docker compose logs -f qwen3-6-35b-nvfp4-engine    # Qwen3.6 (retired rollback)
 docker compose logs -f nemotron-embed-engine
 docker compose logs -f qwen3-coder-next-engine
 docker compose logs -f nemotron-engine
@@ -391,18 +438,18 @@ docker compose exec redis redis-cli -a <REDIS_AUTH> LOG GET
 ### Docker Compose Diagnostic Commands
 
 ```bash
-# Check container status
+# Check container status (Flash-Next stack: use ./scripts/flash-next-compose.sh ps -a, plain compose needs AGW_LANGFUSE_BASIC_AUTH)
 docker compose ps -a
 
 # Check network connectivity
-docker compose exec litellm ping -c 3 qwen3-8-27b-nvfp4-engine   # or qwen3-6-35b-nvfp4-engine for rollback
+docker compose exec litellm ping -c 3 qwen3-8-flash-next-fp4-engine   # default; or qwen3-8-27b-nvfp4-engine / qwen3-6-35b-nvfp4-engine for the rollbacks
 docker compose exec litellm ping -c 3 nemotron-embed-engine
 docker compose exec litellm ping -c 3 qwen3-coder-next-engine
 docker compose exec litellm ping -c 3 langfuse
 
 # Inspect container details
 docker compose inspect litellm
-docker compose inspect qwen3-8-27b-nvfp4-engine   # or qwen3-6-35b-nvfp4-engine for rollback
+docker compose inspect qwen3-8-flash-next-fp4-engine   # default; or qwen3-8-27b-nvfp4-engine / qwen3-6-35b-nvfp4-engine for the rollbacks
 docker compose inspect nemotron-embed-engine
 
 # Execute commands in container
