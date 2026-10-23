@@ -1,0 +1,72 @@
+{
+  "model": "qwen3.8-flash-next",
+  "base_url": "http://localhost:8301/v1",
+  "timestamp": "2026-10-22T21:47:59",
+  "results": [
+    {
+      "name": "Connectivity",
+      "status": "PASS",
+      "detail": "Got response: '\\n\\npong'",
+      "elapsed_s": 0.88
+    },
+    {
+      "name": "Reasoning presence",
+      "status": "PASS",
+      "detail": "reasoning_tokens=104, correct_answer=True, content_tail='\\n\\n408'",
+      "elapsed_s": 2.49
+    },
+    {
+      "name": "Small-budget reasoning risk",
+      "status": "WARN",
+      "detail": "Known behavior reproduced: max_tokens=20 returned empty content (all tokens spent on reasoning). Not a new bug \u2014 a known trait of reasoning models (see the SIMPLIFICATION PASS note in docker-compose.qwen3.8.yml). Flag this to harness authors if they use small per-call token budgets.",
+      "elapsed_s": 0.73
+    },
+    {
+      "name": "Single tool call",
+      "status": "PASS",
+      "detail": "read_file({'path': 'src/app.py'})",
+      "elapsed_s": 1.74
+    },
+    {
+      "name": "Tool selection breadth (4/4)",
+      "status": "PASS",
+      "detail": "[OK] Find every place the function `handleSub... -> search_code; [OK] Show me what's in package.json... -> read_file; [OK] Create a new file called utils/helpers.j... -> write_file; [OK] Run the test suite with npm test... -> execute_command",
+      "elapsed_s": 8.27
+    },
+    {
+      "name": "Multi-turn tool context",
+      "status": "PASS",
+      "detail": "Correctly used prior tool result: read_file({'path': 'src/components/TodoList.jsx'})",
+      "elapsed_s": 2.7
+    },
+    {
+      "name": "No hallucinated tool calls",
+      "status": "PASS",
+      "detail": "Plain-text answer: \"\\n\\n**API** stands for **Application Programming Interface**.\\n\\nIt's a contract tha\"",
+      "elapsed_s": 4.29
+    },
+    {
+      "name": "Streaming reconstruction",
+      "status": "PASS",
+      "detail": "read_file({'path': 'README.md'}) reassembled correctly from stream",
+      "elapsed_s": 1.37
+    },
+    {
+      "name": "Vision",
+      "status": "PASS",
+      "detail": "Identified the 64x64 red PNG: 'Red'",
+      "elapsed_s": 2.44
+    },
+    {
+      "name": "Decode throughput",
+      "status": "PASS",
+      "detail": "completion_tokens=1024, elapsed=22.5s, ~45.5 tok/s (includes prefill/TTFT)",
+      "elapsed_s": 22.49
+    }
+  ],
+  "summary": {
+    "passed": 9,
+    "failed": 0,
+    "warned": 1
+  }
+}

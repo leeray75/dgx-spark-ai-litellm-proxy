@@ -1,6 +1,17 @@
 # =============================================================================
 # docker-compose.qwen3.8.yml — Qwen3.8-27B-NVFP4 (nvidia, ModelOpt) on NVIDIA DGX Spark (GB10)
 #
+# 2026-10-22 — ROLLBACK STACK: docker-compose.qwen3.8-flash-next.yml (Qwen3.8-Flash-Next-FP4-Local)
+# is now the default/primary stack (user decision U-4, docs/specs/qwen38-flash-next-stack/).
+# This file stays fully wired and is the rollback path, BUT the qwen3.8-27b and
+# qwen3.8-27b-nothink aliases were removed from litellm-config.yaml and
+# agentgateway/config.yaml: before bringing this stack up, uncomment the ROLLBACK
+# blocks in BOTH files (and set litellm default_fallbacks back to ["qwen3.8-27b"]),
+# then re-run ./scripts/agentgateway-sync-costs.py. ./scripts/restart.sh qwen3.8 and
+# ./scripts/model-switch.sh qwen3.8 print this warning, restore local-image-gen-mcp
+# (compose up -d) and start the standalone agentgateway after the engine is healthy.
+# The "DEFAULT/PRIMARY STACK" wording below describes 2026-09-09 – 2026-10-22.
+#
 # Main stack configuration. Includes full Langfuse/LiteLLM observability stack.
 # DEFAULT/PRIMARY STACK as of 2026-09-09 (explicit user decision — see the
 # CHECKPOINT SWAP note and RESULT section below for the accuracy-vs-throughput

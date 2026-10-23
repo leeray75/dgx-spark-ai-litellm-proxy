@@ -1,0 +1,48 @@
+{
+  "model": "qwen3.8-flash-next",
+  "base_url": "http://localhost:4000/v1",
+  "timestamp": "2026-10-22T21:50:49",
+  "results": [
+    {
+      "name": "Connectivity",
+      "status": "PASS",
+      "detail": "Got: '\\n\\npong'",
+      "elapsed_s": 1.01
+    },
+    {
+      "name": "Reasoning presence",
+      "status": "WARN",
+      "detail": "No reasoning field surfaced via langchain_openai (correct_answer=True) \u2014 may be a langchain_openai field-mapping gap rather than thinking actually being off; cross-check with the raw-HTTP script's usage.completion_tokens_details.reasoning_tokens.",
+      "elapsed_s": 1.89
+    },
+    {
+      "name": "Single tool call",
+      "status": "PASS",
+      "detail": "call={'name': 'read_file', 'args': {'path': 'src/app.py'}}, final answer reflects tool result: \"\\n\\nIt's a minimal Flask web application that starts a server on port 5000 and res\"",
+      "elapsed_s": 3.43
+    },
+    {
+      "name": "Tool selection breadth (2/4)",
+      "status": "FAIL",
+      "detail": "[PASS] Find every place the function `handleSub... -> search_code; [PASS] Show me what's in package.json... -> read_file; [FAIL] Create a new file called utils/helpers.j... -> GraphRecursionError: Recursion limit of 15 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT; [FAIL] Run the test suite with npm test... -> GraphRecursionError: Recursion limit of 15 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT",
+      "elapsed_s": 80.18
+    },
+    {
+      "name": "Real multi-step chain",
+      "status": "PASS",
+      "detail": "calls=['search_code', 'read_file', 'search_code', 'execute_command', 'execute_command', 'read_file', 'read_file'], final answer reflects the file content",
+      "elapsed_s": 28.75
+    },
+    {
+      "name": "No hallucinated tool calls",
+      "status": "PASS",
+      "detail": "Plain-text answer: \"\\n\\n**API** stands for **Application Programming Interface**.\\n\\nIt's a contract tha\"",
+      "elapsed_s": 2.51
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 1,
+    "warned": 1
+  }
+}

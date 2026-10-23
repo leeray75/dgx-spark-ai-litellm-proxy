@@ -6,6 +6,57 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Agentic eval harness: better tools, context compaction, repeat runs, automated checks** (2026-10-23), from the
+  first run's grading. New tools `show_diff`, `delete_file`, `run_python` (snippet in the same sandbox); `edit_file`
+  echoes the edited lines and `write_file`/`edit_file` syntax-check Python; `run_tests` puts the summary and failing
+  tests first and has `show_output`; `finish` is refused once while files changed since the last passing full run.
+  Every tool result shows "turn N/M" with wrap-up reminders near the limit; a passing full run checkpoints the
+  workspace and grading scores both the final state and that checkpoint. Context compaction like Goose/Cline: past
+  `--compact-at-tokens` (48k) older tool outputs and large tool arguments become stubs, keeping the last 8 turns.
+  `--repeats` (default 3) with per-task pass rate and score spread in `meta.per_task`; `meta.sampling` records the
+  engine's defaults (the harness sends none). Mechanical checks per attempt: scratch files, removed original tests,
+  original tests on the final code, diff size vs. reference, first green turn, tool error rate. Stricter hidden
+  tests: log analyzer adds evenly spread traffic and best-of-3 timing; memo cache repeats its race tests; the
+  evaluator spec states the 100-level nesting requirement (with a test).
+- **Agentic task evaluation harness** (2026-10-23). `scripts/eval-agentic-tasks.py` gives a served model (default
+  `qwen3.8-flash-next` through agentgateway) a small repository and a real task, with deterministic tools and no
+  shell: `list_files`, `read_file`, `outline` (`ast`-based), `grep`, `write_file`, `edit_file`, `check_syntax`,
+  `run_tests`, `finish`. Code runs only in `run_tests` and grading, inside `eval-sandbox:py312`
+  (`scripts/eval-tasks/sandbox/Dockerfile`: `--network none`, read-only root, tmpfs, 1 GiB, 2 CPUs, no
+  capabilities; the workspace is streamed in as a tar). Five tasks in `scripts/eval-tasks/` (bug fix, CLI feature,
+  performance, concurrency, implement-from-spec), each with hidden tests and a reference solution; `--self-test`
+  checks hidden tests fail on the starting code and pass on the reference. Results JSON is saved after every task
+  (`--resume`). First run (`ai-workspace/reports/agentic-eval-qwen3.8-flash-next-20261023T051241Z.json`, graded in
+  `...-20261023-grading.md`): 78/85 hidden tests, 3/5 tasks fully passing, 58 min; three tasks hit the 40-turn limit
+  after finishing the work by turn 15-20. `scripts/eval-hard-problems.py` (single-prompt problem set) saves after
+  every answer, resumes (`--resume`, `--rerun-truncated`), and defaults to 32,768 output tokens.
+- **Qwen3.8-Flash-Next stack: routing, scripts and prices (Phase 3 of `docs/specs/qwen38-flash-next-stack/`)**
+  (2026-10-22). New `qwen3.8-flash-next-nothink` (same `litellm_params` as `qwen3.8-flash-next` plus
+  `extra_body.chat_template_kwargs.enable_thinking: false`, which the checkpoint's chat template honors) and
+  `claude-qwen3.8-flash-next` LiteLLM aliases (explicit `model_name`, so it wins over the `anthropic/*` wildcard;
+  Claude Code's `/model` discovery only lists `claude*`/`anthropic*` IDs; verified with an Anthropic-format
+  `POST /v1/messages`). All three Flash-Next aliases carry measured electricity prices (see *Changed*).
+  agentgateway: provider `vllm-qwen38-flash` → `qwen3-8-flash-next-fp4-engine`, models `qwen3.8-flash-next` and
+  `qwen3.8-flash-next-nothink`. New `scripts/flash-next-compose.sh`: wrapper for
+  `docker-compose.qwen3.8-flash-next.yml` that sources `.env`, derives `AGW_LANGFUSE_BASIC_AUTH`, refuses to run
+  when the Langfuse keys are empty (the `Og==` case) and `exec`s `docker compose`. `restart.sh` and
+  `model-switch.sh` gained a `qwen3.8-flash` target (aliases `flash`, `flash-next`; **now the default**) and a
+  `DRY_RUN=1` mode that prints every mutating command instead of running it. Flash start path: stop
+  `local-image-gen-mcp`, `MemFree` gate (105 GiB; `restart.sh` warns after its cache drop, `model-switch.sh`
+  aborts and prints the exact `sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'`; it can only judge this
+  after the old stack is stopped if an engine is running), `up -d` through the wrapper, 3600 s wait (other targets
+  keep 600 s). `stop_all` also brings down the Flash-Next stack and the standalone agentgateway project. The 27B
+  path prints a prominent ROLLBACK warning, then restores `local-image-gen-mcp` with its compose `up -d` (not
+  `docker start`: stale `ai-bridge` network) and the standalone agentgateway. `status` shows the Flash-Next engine
+  and agentgateway. Langfuse model definition `qwen3.8-flash-next` (pattern `(?i)^(openai/)?(qwen3.8-flash-next)$`,
+  id `cmvk3jw270001mo07qns04r4t`) and the regenerated `agentgateway/costs/langfuse-overlay.json`. Review fixes (same day): `model-switch.sh flash`
+  has a pre-stop page-cache gate (≥ 10 GiB aborts with exit 2 before stopping anything) plus the post-stop `MemFree`
+  gate (exit 3, states that the previous stack is stopped and prints the re-run command); `DRY_RUN` accepts any
+  non-empty value except `0` and prints copy-pasteable (`%q`) commands; both scripts verify after `stop_all` that no
+  engine container or `agentgateway` still runs; the 27B warning lists each item still to restore;
+  `test-agentic-capabilities*.py` default to `qwen3.8-flash-next` and the stdlib script tolerates agentgateway's
+  usage-only stream chunk (`choices: []`).
+
 - **`qwen3.8-27b-nothink` LiteLLM alias** (2026-10-11). Same engine and weights as `qwen3.8-27b`, with
   `extra_body.chat_template_kwargs.enable_thinking: false` on every request, so qwen3.8 skips its reasoning pass.
   For template-filling/data-to-text work and agent subagents — Goose picks it up via
@@ -53,6 +104,41 @@ All notable changes to this project will be documented in this file.
   are left as written.
 
 ### Changed
+
+- **Qwen3.8-Flash-Next-FP4-Local is the default stack; the `qwen3.8-27b` aliases are removed** (2026-10-22,
+  explicit user decisions U-1 – U-4). `qwen3.8-27b` and `qwen3.8-27b-nothink` are gone from `litellm-config.yaml`
+  and `agentgateway/config.yaml`, kept verbatim (with their measured-cost comments) as commented ROLLBACK blocks:
+  uncomment both and set `default_fallbacks` back to `["qwen3.8-27b"]` before running the 27B stack
+  (`docker-compose.qwen3.8.yml`, now the rollback; qwen3.6 is the retired rollback). Clients configured with
+  `qwen3.8-27b` must use `qwen3.8-flash-next` (and `qwen3.8-flash-next-nothink`, e.g. `GOOSE_SUBAGENT_MODEL`).
+  **Behaviour for old names (user decision U-5, intended):** LiteLLM does not return 404 for `qwen3.8-27b`,
+  `qwen3.8-27b-nothink` or any unknown model name; `default_fallbacks` serves them with Flash-Next, thinking ON,
+  echoing the requested name, so `qwen3.8-27b-nothink` callers silently lose no-think until they switch to
+  `qwen3.8-flash-next-nothink`. agentgateway returns 404 `model_not_found`.
+  `default_fallbacks` is `["qwen3.8-flash-next"]` only. `local-image-gen-mcp` stays off while Flash-Next runs
+  (0.80 utilization leaves no room; host `MemAvailable` ~6-8 GiB idle). Measured on this box: first boot ≤ 18 m
+  39 s, ~38 tok/s median in vLLM's log across the tests (27B live median ~21), KV cache 28.03 GiB = 1,491,188
+  tokens. `CLAUDE.md`, `README.md` and `docs/{models,architecture,setup,troubleshooting,agents}.md` updated; new
+  troubleshooting entries for the startup memory check / cache drop and the stale image-gen network.
+- **Flash-Next electricity prices re-derived from a real agent task** (2026-10-22). `input_cost_per_token`
+  1.26e-9 → **3.19e-11**, `output_cost_per_token` 7.42e-8 → **8.69e-8** on all three Flash-Next aliases, the
+  Langfuse `qwen3.8-flash-next` definition (DELETE + POST; the 27B definition is untouched) and
+  `agentgateway/costs/langfuse-overlay.json`. Source: `power_cost.py` over a Goose task, 23:22:29Z – 23:28:45Z
+  (57 decode intervals, 14,581 output / 1,467,673 counted input tokens): decode 41.6 tok/s at 43.7 W → 1.05 J/output
+  token; input is nearly free because agent context is served from prefix cache. With the old input price Langfuse
+  recorded $0.00285 for the task against a measured $0.00134 (GPU energy, $0.298/kWh). Still slightly provisional
+  (under 20,000 output tokens).
+- **Flash-Next electricity prices** (2026-10-22, **provisional**). `input_cost_per_token` 1.26e-9,
+  `output_cost_per_token` 7.42e-8 on all three Flash-Next aliases, from `power_cost.py` over 21:46:35Z – 22:07:59Z
+  (0.35 h, 254 samples; **21 decode intervals / 12,482 output tokens**, below the 30-interval / 20,000-token bar):
+  decode 40.9 tok/s at 36.7 W → 0.90 J/output token ($0.0742 per 1M output tokens at $0.298/kWh); counted input
+  1.26e-9 (56,918 tokens, mostly fresh test prompts, so expect it to fall toward the 27B's 1.2e-10 with
+  prefix-cache-heavy agent traffic). Re-derive after about a day of real use. The Langfuse `dgx-spark` definition
+  was created (none existed); the 27B definition `cmv2s7old000apj07jlh6hol6` is untouched.
+- **`model-switch.sh`: `HF_TOKEN` may come from the environment.** `check_env_vars` required a `HF_TOKEN=` line in
+  `.env`, but `.env` only has a comment (the token is exported from `~/.bashrc`), so every target failed with
+  "Missing required variable: HF_TOKEN". A variable already exported in the environment now counts. The `status`
+  output uses `echo -e`, so colors render instead of printing literal `\033[...` text.
 
 - **qwen3.8 `--gpu-memory-utilization` 0.6 → 0.54 (KV-cache right-sizing)** (2026-10-18). At 0.6 the KV
   cache held 45.37 GiB = 1,279,965 tokens (4.88× of 262,144), but `--max-num-seqs 4` can only ever use

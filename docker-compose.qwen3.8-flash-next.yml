@@ -1,0 +1,598 @@
+# =============================================================================
+# docker-compose.qwen3.8-flash-next.yml — nvidia/Qwen3.8-Flash-Next-FP4-Local on NVIDIA DGX Spark (GB10)
+#
+# STATUS: DEFAULT STACK since 2026-10-22 (Phase 3 of docs/specs/qwen38-flash-next-stack/;
+#         user decision U-4). Written in Phase 1, first booted 2026-10-22 (Phase 2: healthy
+#         in <= 18 m 39 s, tests in research.md R-12), made the default in Phase 3. The 27B
+#         stack (docker-compose.qwen3.8.yml) is now the rollback.
+#
+# What it is: the docker-compose.qwen3.8.yml stack (Langfuse, LiteLLM, embedding
+# engine) with the Qwen3.8-27B engine replaced by a Qwen3.8-Flash-Next-FP4-Local
+# engine (MoE, ~6B active of 125B), plus the agentgateway service from
+# docker-compose.agentgateway.yml, so the whole thing is one `up -d`.
+#
+# USAGE (every compose command on this file needs AGW_LANGFUSE_BASIC_AUTH, incl. config/logs/down):
+#   ./scripts/flash-next-compose.sh up -d          # also: ps | logs -f <service> | down | config --quiet
+#   The wrapper (Phase 3, FR-P3-08) sources .env, derives the variable, refuses to run
+#   if the Langfuse keys are empty, runs mkdir -p agentgateway/data and exec's
+#   docker compose -f docker-compose.qwen3.8-flash-next.yml "$@". Prefer
+#   ./scripts/restart.sh (default target) or ./scripts/model-switch.sh flash, which also
+#   stop local-image-gen-mcp, check MemFree and wait up to 3600 s (DRY_RUN=1 previews).
+#   Manual equivalent (the :? guard stays): the export MUST come after sourcing .env.
+#   With the Langfuse keys unset the one-liner yields "Og==" (base64 of ":"): non-empty,
+#   passes the :? guard, and silently breaks agentgateway's Langfuse auth.
+#   After a host reboot the engine restarts on its own (restart: unless-stopped since
+#   2026-10-22). Right after a reboot MemFree is ~99 GiB, enough for 0.75 (~91.3 GiB);
+#   if the engine still fails vLLM's free-memory check, drop caches and up -d again.
+#
+# PRECONDITIONS (this stack shares project "ai-litellm-proxy", ports and
+# container names with docker-compose.qwen3.8.yml / .qwen3.6.yml — mutually exclusive):
+#   - local-image-gen-mcp STOPPED (it holds ~18 GB of GPU memory and never frees it).
+#   - the 27B stack (docker-compose.qwen3.8.yml) down.
+#   - the standalone agentgateway project (docker-compose.agentgateway.yml,
+#     project ai-litellm-agentgateway) down: both use container_name "agentgateway".
+#   - HF_TOKEN set in .env. Cold start ~10-13 min after a ~103 GB first download.
+#
+# MEMORY BUDGET (121.7 GiB unified): engine at 0.75 is ~91 GiB (70 GiB weights,
+# PLE table on NVMe, ~17 GiB FP8 KV = ~1M tokens). Embedding engine ~2.5 GB,
+# observability ~5 GB, OS ~6 GB leaves ~10 GB headroom. 0.80 is NVIDIA's validated
+# Spark setting (used until 2026-10-22: ~122.8 GB RAM in use; 0.75 trades ~6 GiB of KV
+# cache for staying under 120 GB); 0.70 leaves less KV than one full 262K sequence (community data),
+# so it is about the floor. The engine depends on the embedding engine being
+# healthy: vLLM refuses to start when free memory < util x total, and the
+# embedding engine asks for 0.1 x total, so it must claim its share first.
+#
+# PORTS: 8301 engine, 8302 embedding, 4000 LiteLLM, 3000 Langfuse, 9090/9091 MinIO,
+#   4100 agentgateway API/MCP, 127.0.0.1:4101 agentgateway UI (unauthenticated),
+#   127.0.0.1:{5432,8123,9000,6379,3030} postgres/clickhouse/redis/worker.
+#
+# ENV OVERRIDES (changing either invalidates the compile cache):
+#   QWEN38_FLASH_GPU_MEMORY_UTILIZATION   default 0.75  (recipe: 0.80; lowered 2026-10-22 to keep RAM < 120 GB)
+#   QWEN38_FLASH_NUM_SPECULATIVE_TOKENS   default 4     (= recipe)
+#
+# PROVENANCE of the Flash-Next engine settings
+#   recipe-verbatim (NVIDIA DGX Spark recipe, model card): image family
+#     (community b12x vLLM), every env var, every vllm flag and value except
+#     those listed under deviations; ipc host, shm 16g, memlock -1, stack
+#     67108864, seccomp/apparmor unconfined, GPU access.
+#   deviation + reason:
+#     --served-model-name qwen3.8-flash-next    three-way name binding (Phase 2)
+#     --gpu-memory-utilization / MTP draft len  env-parameterized, defaults = recipe
+#     bridge network + port 8301:8000           recipe uses --network host
+#     named volumes for vllm/flashinfer/triton/b12x caches   recipe uses host
+#                                               bind mounts; repo convention
+#     image pinned by digest (= :latest on 2026-10-22, arm64, CUDA 13.0.2)
+#                                               mutable tags caused the 2026-08-24 incident
+#     restart: unless-stopped                   user decision 2026-10-22 (was "no":
+#                                               crash-loop guard, ~/.claude/CLAUDE.md
+#                                               rule 4 — now covered by the
+#                                               dgx-safe-update pre-reboot check)
+#     healthcheck via python3 /health           curl not relied on
+#     depends_on embedding engine healthy       see MEMORY BUDGET
+#   unverified (nobody has confirmed on this box):
+#     - curl and python3 are apt-installed per the image history; not confirmed at
+#       runtime (the healthcheck uses python3 only)
+#     - seccomp=unconfined is needed for the io_uring PLE reads (inference)
+#     - qwen3_xml tool-call parsing with Claude Code / Cline (27B uses qwen3_coder)
+#     - memory headroom, throughput (expected ~45 tok/s stock), start_period 3600s
+#
+# KNOWN GAPS (after Phase 3, 2026-10-22):
+#   - Fixed in Phase 3: litellm-config.yaml / agentgateway/config.yaml now route
+#     qwen3.8-flash-next (+ -nothink, claude-qwen3.8-flash-next in LiteLLM) to this
+#     engine; default_fallbacks is Flash-Next only; the 27B aliases are commented
+#     ROLLBACK blocks; Langfuse has a priced qwen3.8-flash-next definition;
+#     restart.sh / model-switch.sh know this stack (target "flash", the default) and
+#     stop_all brings this stack and the standalone agentgateway down; the launcher is
+#     scripts/flash-next-compose.sh.
+#   - Prices were re-derived from real agent traffic on 2026-10-22 (input 3.19e-11,
+#     output 8.69e-8; see litellm-config.yaml and CHANGELOG).
+#   - Still open: local-image-gen-mcp stays off while this stack runs (user decision
+#     U-3; at 0.75 MemAvailable is ~21 GiB idle, not measured with image-gen up); whether
+#     seccomp=unconfined is really needed is untested; no live switch round trip has
+#     been run (the switch scripts were verified by DRY_RUN=1 only).
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — shared instance; two isolated databases:
+  #   "postgres" for Langfuse, "litellm" for LiteLLM
+  # TZ=UTC / PGTZ=UTC required — non-UTC causes incorrect Langfuse query results
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: langfuse-postgres
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}           # set in .env
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}             # Langfuse DB (default)
+      TZ: UTC                                            # required by Langfuse v3
+      PGTZ: UTC
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=512MB
+      -c work_mem=8MB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_compression=on
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # ClickHouse — OLAP store for Langfuse traces, observations, and scores
+  # ---------------------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: langfuse-clickhouse
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - langfuse-clickhouse-data:/var/lib/clickhouse
+      - langfuse-clickhouse-logs:/var/log/clickhouse-server
+      - ./clickhouse-config.xml:/etc/clickhouse-server/config.d/langfuse.xml:ro
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-default}
+      CLICKHOUSE_MAX_SERVER_MEMORY_USAGE_TO_RAM_RATIO: "0.02"
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+    healthcheck:
+      test: ["CMD", "clickhouse-client",
+             "--user", "${CLICKHOUSE_USER:-clickhouse}",
+             "--password", "${CLICKHOUSE_PASSWORD}",
+             "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis — Langfuse event queue + API-key / prompt cache, LiteLLM prompt cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: langfuse-redis
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: >
+      --requirepass ${REDIS_AUTH}
+      --maxmemory 512mb
+      --maxmemory-policy noeviction
+      --save ""
+      --appendonly no
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+    volumes:
+      - langfuse-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_AUTH}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-compatible blob storage for Langfuse trace event payloads
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio
+    container_name: langfuse-minio
+    networks:
+      - ai-bridge
+    ports:
+      - "9090:9000"
+      - "9091:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    volumes:
+      - langfuse-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MinIO Init — creates the "langfuse" bucket on first start, then exits
+  # ---------------------------------------------------------------------------
+  minio-init:
+    image: minio/mc
+    container_name: langfuse-minio-init
+    networks:
+      - ai-bridge
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minio} ${MINIO_ROOT_PASSWORD};
+        mc mb --ignore-existing local/langfuse;
+        echo 'MinIO bucket ready';
+      "
+    restart: on-failure
+
+  # ---------------------------------------------------------------------------
+  # Langfuse Worker — async event processor (REQUIRED in v3)
+  # ---------------------------------------------------------------------------
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: langfuse-worker
+    networks:
+      - ai-bridge
+    ports:
+      - "127.0.0.1:3030:3030"
+    depends_on: &langfuse-depends-on
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-postgres}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
+      CLICKHOUSE_MIGRATION_URL: clickhouse://${CLICKHOUSE_USER:-clickhouse}:${CLICKHOUSE_PASSWORD}@clickhouse:9000/${CLICKHOUSE_DATABASE:-default}
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_EXTERNAL_ENDPOINT: http://localhost:9090
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+      LANGFUSE_S3_BATCH_EXPORT_BUCKET: langfuse
+      LANGFUSE_S3_BATCH_EXPORT_PREFIX: exports/
+      LANGFUSE_S3_BATCH_EXPORT_REGION: us-east-1
+      LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT: http://localhost:9090
+      LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: ${REDIS_AUTH}
+      # Node.js heap cap — qwen3.6's file discovered V8 doesn't reliably
+      # respect a Docker cgroup memory limit under real trace-ingestion load;
+      # applying the same fix here preemptively rather than after a crash.
+      NODE_OPTIONS: "--max-old-space-size=1024"
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Langfuse Web — UI + public ingestion API
+  # ---------------------------------------------------------------------------
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: langfuse
+    networks:
+      - ai-bridge
+    ports:
+      - "3000:3000"
+    depends_on: *langfuse-depends-on
+    environment:
+      <<: *langfuse-env
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+      NODE_OPTIONS: "--max-old-space-size=1024"
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # vLLM Engine — nvidia/Qwen3.8-Flash-Next-FP4-Local (ModelOpt mixed NVFP4/MXFP8, QAD)
+  # NVIDIA DGX Spark — GB10 (128GB unified memory)
+  # Flags and env: NVIDIA's DGX Spark recipe from the model card, verbatim,
+  # except --served-model-name and the two env-parameterized values (see the
+  # PROVENANCE section in the header).
+  # ---------------------------------------------------------------------------
+  qwen3-8-flash-next-fp4-engine:
+    # Community image required: upstream vLLM can't read the checkpoint's
+    # compressed NVFP4 scale format ("csf") yet. Pinned by digest (= :latest on 2026-10-22,
+    # arm64, CUDA 13.0.2, built 2026-10-15) — never use the mutable tag.
+    image: eugr/spark-vllm-b12x@sha256:03a956544e9f9b4b7ba91690469fbe7848bdbef29a7d2e0f5788368467bb3595
+    platform: linux/arm64
+    container_name: qwen3-8-flash-next-fp4-engine
+    networks:
+      - ai-bridge
+    ports:
+      - "8301:8000"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - vllm-qwen38-flash-compile-cache:/root/.cache/vllm
+      - vllm-qwen38-flash-flashinfer-cache:/root/.cache/flashinfer
+      - vllm-qwen38-flash-triton-cache:/root/.triton
+      - vllm-qwen38-flash-b12x-cache:/root/.cache/b12x
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+      VLLM_PLE_TABLE_MEMORY: "disk"
+      B12X_DISK_BACKEND: "io_uring"
+      CUTE_DSL_ARCH: "sm_121a"
+      SAFETENSORS_FAST_GPU: "1"
+      VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+      VLLM_SSM_CONV_STATE_LAYOUT: "DS"
+      VLLM_USE_AOT_COMPILE: "1"
+      VLLM_USE_MEGA_AOT_ARTIFACT: "1"
+      VLLM_USE_V2_MODEL_RUNNER: "1"
+      B12X_POLICY_MODE: "auto"
+      VLLM_MXFP8_LM_HEAD: "1"
+      VLLM_B12X_MOE_FP4_LAYER_MAX_INPUT_SCALE: "w13"
+      VLLM_B12X_MOE_FP4_FORCE_A16: "1"
+      B12X_W4A16_A4_PREFILL: "1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ipc: host
+    shm_size: '16gb'
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      stack:
+        soft: 67108864
+        hard: 67108864
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    depends_on:
+      nemotron-embed-engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 120
+      start_period: 3600s
+    command: >
+      vllm serve nvidia/Qwen3.8-Flash-Next-FP4-Local
+      --served-model-name qwen3.8-flash-next
+      --host 0.0.0.0
+      --port 8000
+      --tensor-parallel-size 1
+      --pipeline-parallel-size 1
+      --mamba-cache-mode align
+      --enable-prefix-caching
+      --enable-chunked-prefill
+      --dtype bfloat16
+      --kv-cache-dtype fp8
+      --quantization modelopt_mixed
+      --block-size 16
+      --load-format b12x
+      --max-model-len 262144
+      --max-num-seqs 8
+      --max-num-batched-tokens 4096
+      --speculative-config '{"method":"mtp","num_speculative_tokens":${QWEN38_FLASH_NUM_SPECULATIVE_TOKENS:-4}}'
+      --gdn-decode-kernel b12x
+      --linear-backend b12x
+      --moe-backend b12x
+      --no-enable-flashinfer-autotune
+      --mm-encoder-tp-mode data
+      --reasoning-parser qwen3
+      --tool-call-parser qwen3_xml
+      --enable-auto-tool-choice
+      --compilation-config '{"pass_config":{"fuse_act_quant":true}}'
+      --gpu-memory-utilization ${QWEN38_FLASH_GPU_MEMORY_UTILIZATION:-0.75}
+    # unless-stopped (2026-10-22, user decision): comes back after a host reboot.
+    # Was "no" (P1 FR-P1-17). Before a driver/kernel update + reboot, the
+    # dgx-safe-update checklist flags unless-stopped containers; run
+    # `docker update --restart=no qwen3-8-flash-next-fp4-engine` there if wanted.
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # vLLM Embedding Engine — nvidia/Nemotron-3-Embed-1B-NVFP4
+  # Identical to the service in docker-compose.qwen3.6.yml — same model, same
+  # cache volume name (vllm-embed-compile-cache is a Docker-host-wide named
+  # volume, not scoped to one compose file, so it's reused as-is here without
+  # re-downloading or re-compiling).
+  # Source: https://huggingface.co/nvidia/Nemotron-3-Embed-1B-NVFP4
+  # ---------------------------------------------------------------------------
+  nemotron-embed-engine:
+    image: vllm/vllm-openai:nightly
+    platform: linux/arm64
+    container_name: nemotron-embed-engine
+    networks:
+      - ai-bridge
+    ports:
+      - "8302:8000"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - vllm-embed-compile-cache:/root/.cache/vllm
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ipc: host
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 900s
+    command: >
+      nvidia/Nemotron-3-Embed-1B-NVFP4
+      --served-model-name nemotron-3-embed-1b-nvfp4
+      --host 0.0.0.0
+      --port 8000
+      --max-model-len 32768
+      --max-num-batched-tokens 32768
+      --max-cudagraph-capture-size 4096
+      --gpu-memory-utilization 0.1
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # LiteLLM Proxy — unified OpenAI-compatible API + Langfuse OTEL tracing
+  # ---------------------------------------------------------------------------
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm-proxy
+    networks:
+      - ai-bridge
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+      - ./litellm-callbacks/anthropic_input_text_fix.py:/app/anthropic_input_text_fix.py:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_DROP_PARAMS: ${LITELLM_DROP_PARAMS:-true}
+      LITELLM_MODIFY_PARAMS: ${LITELLM_MODIFY_PARAMS:-true}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_OTEL_HOST: http://langfuse:3000
+      LANGFUSE_HOST: ${LANGFUSE_HOST}
+      LANGFUSE_TRACING_ENVIRONMENT: production       # native langfuse callback; matches pre-2026-10-09 OTEL data
+      LITELLM_CACHE: "true"
+      LITELLM_CACHE_TYPE: "redis"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_AUTH}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qwen3-8-flash-next-fp4-engine:
+        condition: service_healthy
+      nemotron-embed-engine:
+        condition: service_healthy
+      langfuse-web:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--drop_params"]
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    restart: always
+
+  # ---------------------------------------------------------------------------
+  # agentgateway — trial gateway next to LiteLLM (merged from docker-compose.agentgateway.yml)
+  # Ports: 4100 LLM API + MCP at /mcp/image-gen (API key on both);
+  #        127.0.0.1:4101 UI (unauthenticated; local only).
+  # ./agentgateway/data must exist (`mkdir -p agentgateway/data`);
+  # scripts/agentgateway-up.sh creates it for the standalone project.
+  # restart: unless-stopped, not always — avoids piling onto a bad boot after a
+  # driver/kernel update (see ~/.claude/CLAUDE.md).
+  # ---------------------------------------------------------------------------
+  agentgateway:
+    image: cr.agentgateway.dev/agentgateway:v1.6.0
+    container_name: agentgateway
+    user: "1000:1000"
+    networks:
+      - ai-bridge
+    ports:
+      - "4100:4100"
+      - "127.0.0.1:4101:4101"
+    volumes:
+      # Read-only: config lives in git. UI edits won't persist (by design).
+      - ./agentgateway/config.yaml:/config.yaml:ro
+      - ./agentgateway/data:/data
+      # Generated by scripts/agentgateway-sync-costs.py from Langfuse prices.
+      - ./agentgateway/costs:/costs:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      AGW_LANGFUSE_BASIC_AUTH: ${AGW_LANGFUSE_BASIC_AUTH:?export AGW_LANGFUSE_BASIC_AUTH=$$(printf '%s:%s' "$$LANGFUSE_PUBLIC_KEY" "$$LANGFUSE_SECRET_KEY" | base64 -w0) after 'set -a; source .env; set +a' - see header}
+    command: ["-f", "/config.yaml"]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  ai-bridge:
+    driver: bridge
+
+# =============================================================================
+# Named volumes
+# =============================================================================
+volumes:
+  langfuse-postgres-data:
+  langfuse-clickhouse-data:
+  langfuse-clickhouse-logs:
+  langfuse-minio-data:
+  langfuse-redis-data:
+  vllm-embed-compile-cache:       # shared with docker-compose.qwen3.6.yml — same embedding model
+  # Flash-Next engine caches (replace the recipe's host bind mounts)
+  vllm-qwen38-flash-compile-cache:      # persists /root/.cache/vllm (torch.compile AOT artifacts)
+  vllm-qwen38-flash-flashinfer-cache:   # persists /root/.cache/flashinfer
+  vllm-qwen38-flash-triton-cache:       # persists /root/.triton
+  vllm-qwen38-flash-b12x-cache:         # persists /root/.cache/b12x

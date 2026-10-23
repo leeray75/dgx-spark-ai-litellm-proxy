@@ -1,0 +1,102 @@
+{
+  "providers": {
+    "anthropic": {
+      "models": {
+        "claude-fable-5": {
+          "rates": {
+            "cacheRead": "1",
+            "cacheWrite": "12.5",
+            "input": "10",
+            "output": "50"
+          }
+        },
+        "claude-haiku-5-5": {
+          "rates": {
+            "cacheRead": "0.01",
+            "cacheWrite": "0.125",
+            "input": "0.1",
+            "output": "0.5"
+          },
+          "tiers": [
+            {
+              "contextOver": 100000,
+              "rates": {
+                "cacheRead": "0.05",
+                "cacheWrite": "0.625",
+                "input": "0.5",
+                "output": "2.5"
+              }
+            }
+          ]
+        },
+        "claude-opus-4-8": {
+          "rates": {
+            "cacheRead": "0.5",
+            "cacheWrite": "6.25",
+            "input": "5",
+            "output": "25"
+          }
+        },
+        "claude-opus-5-5": {
+          "rates": {
+            "cacheRead": "0.2",
+            "cacheWrite": "5",
+            "input": "4",
+            "output": "20"
+          }
+        },
+        "claude-sonnet-5": {
+          "rates": {
+            "cacheRead": "0.2",
+            "cacheWrite": "2.5",
+            "input": "2",
+            "output": "10"
+          }
+        },
+        "claude-sonnet-5-5": {
+          "rates": {
+            "cacheRead": "0.1",
+            "cacheWrite": "2.5",
+            "input": "2",
+            "output": "10"
+          }
+        }
+      }
+    },
+    "vllm-embed": {
+      "models": {
+        "nemotron-3-embed-1b-nvfp4": {
+          "rates": {
+            "input": "0.015"
+          }
+        }
+      }
+    },
+    "vllm-qwen36": {
+      "models": {
+        "qwen3.6-35b-a3b": {
+          "rates": {
+            "input": "0.015",
+            "output": "0.035"
+          }
+        }
+      }
+    },
+    "vllm-qwen38-flash": {
+      "models": {
+        "qwen3.8-flash-next": {
+          "rates": {
+            "input": "0.000032",
+            "output": "0.0869"
+          }
+        },
+        "qwen3.8-flash-next-nothink": {
+          "rates": {
+            "input": "0.000032",
+            "output": "0.0869"
+          }
+        }
+      }
+    }
+  }
+}

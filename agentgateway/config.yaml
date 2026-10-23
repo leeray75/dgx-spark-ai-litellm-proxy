@@ -1,0 +1,265 @@
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+# =============================================================================
+# agentgateway/config.yaml — side-by-side TRIAL of agentgateway (2026-10-20)
+# =============================================================================
+# Runs NEXT TO litellm-proxy, not instead of it. Started by
+# scripts/agentgateway-up.sh (docker-compose.agentgateway.yml), joined to the
+# existing ai-litellm-proxy_ai-bridge network so it reaches the same vLLM
+# engines and Langfuse by container name.
+#
+#   4100 (LAN)        — LLM API: /v1/chat/completions, /v1/messages, /v1/embeddings
+#                       MCP:     /mcp/image-gen → local-image-gen-mcp
+#   127.0.0.1:4101    — agentgateway UI (analytics, logs, CEL playground)
+#
+# Clients authenticate with the SAME key as LiteLLM (LITELLM_MASTER_KEY), so
+# trying a client against agentgateway is just changing :4000 → :4100.
+#
+# Mapping from litellm-config.yaml:
+#   anthropic/* passthrough      → claude-* (Anthropic provider; see note there)
+#   qwen3.8-flash-next           → custom provider vllm-qwen38-flash, completions
+#                                  only (default stack since 2026-10-22)
+#   qwen3.8-flash-next-nothink   → same + overrides.chat_template_kwargs
+#   qwen3.8-27b, -nothink        → REMOVED 2026-10-22 (user decision U-1); kept
+#                                  as a commented ROLLBACK block below. LiteLLM
+#                                  additionally has claude-qwen3.8-flash-next
+#                                  for Claude Code's /model picker; here the
+#                                  claude-* pattern goes to Anthropic, so it is
+#                                  not mirrored.
+#   qwen3.6-35b-a3b              → custom provider (rollback engine; only up if
+#                                  docker-compose.qwen3.6.yml is running)
+#   nemotron-3-embed-1b-nvfp4    → custom provider, embeddings format
+#
+# NOT carried over (gaps to evaluate during the trial):
+#   - Redis exact-match response cache (no agentgateway equivalent)
+#   - default_fallbacks → qwen3.8-flash-next (agentgateway failover is via
+#     virtualModels and works by evicting unhealthy targets, not per-request
+#     retry onto a different model; not configured here yet)
+#   - anthropic_input_text_fix callback (agentgateway parses Messages natively;
+#     check whether input_text/output_text blocks still need normalizing)
+#   - Postgres spend logs / LiteLLM price fields (Langfuse prices traces from
+#     its own model table; agentgateway's cost catalog has no qwen entries)
+# =============================================================================
+
+config:
+  database:
+    # Local analytics/logs for the UI. Not shared with LiteLLM's Postgres.
+    url: sqlite:///data/data.db
+  # Prices for the cost dashboard, generated from the Langfuse dgx-spark
+  # project's model definitions by scripts/agentgateway-sync-costs.py (do not
+  # hand-edit). An overlay on agentgateway's built-in public-model catalog.
+  modelCatalog:
+  - file: /costs/langfuse-overlay.json
+
+gateways:
+  default:
+    port: 4100
+  ui:
+    port: 4101
+
+ui:
+  # Own gateway so docker-compose can publish it on 127.0.0.1 only. The UI has
+  # no auth configured — do not publish 4101 on 0.0.0.0.
+  gateways: ui
+
+frontendPolicies:
+  http:
+    # Default is 2 MiB, which a single detailed 1024px PNG from generate_image
+    # exceeds once base64-encoded in the MCP JSON response ("body exceeded
+    # buffer limit", HTTP 500). 64 MiB covers any output image and several
+    # base64 edit_image references (image_id references avoid this entirely).
+    # Requests are buffered in memory: keep well under the 512M container cap.
+    maxBufferSize: 67108864
+  # OTLP/HTTP straight into Langfuse's OTel ingestion endpoint. Tagged with its
+  # own environment so the trial's traces can be filtered apart from (and never
+  # mixed into cost totals with) LiteLLM's "production" traces.
+  tracing:
+    host: langfuse:3000
+    protocol: http
+    path: /api/public/otel/v1/traces
+    randomSampling: true
+    resources:
+      service.name: '"agentgateway"'
+      deployment.environment.name: '"agentgateway-trial"'
+    # Image MCP calls → priced in Langfuse. Langfuse's OTel mapping reads
+    # model + usage from these attributes and prices them with its
+    # `qwen-image-2.1-turbo` model definition (prices per image, "generate" /
+    # "edit" usage keys, measured GPU electricity — see llm-power-cost skill).
+    # Every other request (LLM, tools/list, other tools) makes the expression
+    # fail, which leaves the attribute off that span.
+    attributes:
+      langfuse.observation.model.name: >-
+        mcp.tool.name in ["generate_image", "edit_image"] ? "qwen-image-2.1-turbo" : fail("not an image call")
+      langfuse.observation.usage_details: >-
+        mcp.tool.name == "generate_image" ? toJson({"generate": 1}) :
+        mcp.tool.name == "edit_image" ? toJson({"edit": 1}) : fail("not an image call")
+    policies:
+      requestHeaderModifier:
+        set:
+          # base64("<LANGFUSE_PUBLIC_KEY>:<LANGFUSE_SECRET_KEY>"), computed by
+          # scripts/agentgateway-up.sh — not stored in .env.
+          Authorization: "Basic $AGW_LANGFUSE_BASIC_AUTH"
+
+# MCP servers, one path each on the LLM port. These use `routes` rather than
+# the simplified `mcp:` section because that one is fixed at /mcp, and the
+# llm section's catch-all "/" route would otherwise swallow MCP requests
+# ("missing string field 'model'"). Routes are ranked by path-prefix length,
+# so /mcp/<name> wins over "/". Add further servers as /mcp/<name> routes.
+routes:
+- name: mcp-image-gen
+  gateways: [default]
+  matches:
+  - path:
+      pathPrefix: /mcp/image-gen
+  policies:
+    # local-image-gen-mcp has no auth of its own; this adds it. Same key as LLM.
+    apiKey:
+      mode: strict
+      keys:
+      - key: "$LITELLM_MASTER_KEY"
+        metadata:
+          user: owner
+    # json_response=True means headers only arrive when the tool finishes, and
+    # generations are serialized behind one lock (Turbo ~14-17s each, base
+    # model ~60-70s), so a queued call can take minutes.
+    timeout:
+      requestTimeout: 600s
+  backends:
+  - mcp:
+      targets:
+      # ~/vscode-workspace/local-image-gen-mcp, Streamable HTTP. Reached by
+      # container name on ai-bridge (its docker-compose.override.yml joins it).
+      # Started separately (restart: no) — when it's down, calls fail until
+      # it's back.
+      - name: local-image-gen
+        mcp:
+          host: http://local-image-gen-mcp:8500/mcp
+        policies:
+          http:
+            # The upstream call has its own 10s default, separate from the
+            # route timeout above; generate_image failed at exactly 10s
+            # ("upstream call timeout") without this. NOTE: a config
+            # hot-reload did not apply a change here — `docker restart
+            # agentgateway` did.
+            requestTimeout: 600s
+
+llm:
+  gateways: default
+
+  policies:
+    apiKey:
+      mode: strict
+      keys:
+      - key: "$LITELLM_MASTER_KEY"
+        metadata:
+          user: owner
+    # Lets the UI's Playground (served on :4101, a different origin) call the
+    # LLM API on :4100 from the browser. Only the UI's own origins; the UI is
+    # reached at localhost:4101 directly or through an SSH tunnel (which must
+    # forward 4100 too: the Playground calls <same hostname>:4100).
+    # allowHeaders: the UI only treats CORS as configured when "*" is listed,
+    # but browsers never let "*" cover Authorization, so name it explicitly too.
+    cors:
+      allowOrigins:
+      - http://localhost:4101
+      - http://127.0.0.1:4101
+      allowMethods: [GET, POST, OPTIONS]
+      allowHeaders: ["*", authorization, content-type, x-api-key, anthropic-version]
+    # Matches litellm request_timeout (1500s): long agentic turns from
+    # OpenCode/Goose must never be cut off by the proxy first.
+    timeout:
+      requestTimeout: 1500s
+
+  providers:
+  # vLLM speaks chat/completions and embeddings. /v1/responses is deliberately
+  # NOT declared: for Messages requests agentgateway prefers Responses when it
+  # is available, and that conversion silently drops thinking history (same
+  # class of problem as LiteLLM issue #29518). completions-only keeps
+  # reasoning_content <-> thinking blocks intact.
+  - name: vllm-qwen38-flash
+    provider:
+      custom:
+        formats:
+        - type: completions
+    params:
+      baseUrl: http://qwen3-8-flash-next-fp4-engine:8000/v1
+      apiKey: "none"
+  # ── ROLLBACK: nvidia/Qwen3.8-27B-NVFP4 provider (retired 2026-10-22) ───────
+  # Uncomment this provider and the two 27B models below (and restore the
+  # matching block in litellm-config.yaml) before running
+  # ./scripts/model-switch.sh qwen3.8 / restart.sh qwen3.8.
+  # - name: vllm-qwen38
+  #   provider:
+  #     custom:
+  #       formats:
+  #       - type: completions
+  #   params:
+  #     baseUrl: http://qwen3-8-27b-nvfp4-engine:8000/v1
+  #     apiKey: "none"
+  - name: vllm-qwen36
+    provider:
+      custom:
+        formats:
+        - type: completions
+    params:
+      baseUrl: http://qwen3-6-35b-nvfp4-engine:8000/v1
+      apiKey: "none"
+  - name: vllm-embed
+    provider:
+      custom:
+        formats:
+        - type: embeddings
+    params:
+      baseUrl: http://nemotron-embed-engine:8000/v1
+      apiKey: "none"
+
+  models:
+  # ── Anthropic ──────────────────────────────────────────────────────────────
+  # Claude Code sends bare IDs (claude-opus-5-5 etc.), so match claude-*.
+  # The model name is forwarded unchanged, so future IDs work without edits.
+  - name: "claude-*"
+    provider: anthropic
+    params:
+      apiKey: "$ANTHROPIC_API_KEY"
+
+  # ── Primary chat: nvidia/Qwen3.8-Flash-Next-FP4-Local (default 2026-10-22) ─
+  - name: qwen3.8-flash-next
+    provider:
+      reference: vllm-qwen38-flash
+
+  # ── No-thinking alias (same engine) ────────────────────────────────────────
+  - name: qwen3.8-flash-next-nothink
+    provider:
+      reference: vllm-qwen38-flash
+    params:
+      model: qwen3.8-flash-next
+    overrides:
+      chat_template_kwargs:
+        enable_thinking: false
+
+  # ── ROLLBACK: nvidia/Qwen3.8-27B-NVFP4 models (retired 2026-10-22) ─────────
+  # Uncomment together with the vllm-qwen38 provider above.
+  # - name: qwen3.8-27b
+  #   provider:
+  #     reference: vllm-qwen38
+  #
+  # - name: qwen3.8-27b-nothink
+  #   provider:
+  #     reference: vllm-qwen38
+  #   params:
+  #     model: qwen3.8-27b
+  #   overrides:
+  #     chat_template_kwargs:
+  #       enable_thinking: false
+
+  # ── Rollback engine ────────────────────────────────────────────────────────
+  - name: qwen3.6-35b-a3b
+    provider:
+      reference: vllm-qwen36
+
+  # ── Embeddings ─────────────────────────────────────────────────────────────
+  # Callers still need the "query:" / "passage:" input prefix.
+  - name: nemotron-3-embed-1b-nvfp4
+    provider:
+      reference: vllm-embed
+    defaults:
+      encoding_format: float

@@ -2,7 +2,8 @@
 """
 Agentic Capability Test — Thinking, Reasoning, and Tool Calling
 ================================================================
-Exercises a served model through LiteLLM the same way an agentic coding
+Exercises a served model through LiteLLM (or directly against a vLLM engine,
+via --base-url) the same way an agentic coding
 harness (opencode, Cline, Claude Code) actually uses it: OpenAI-compatible
 /v1/chat/completions, a realistic multi-tool palette, multi-turn tool-result
 context, and streaming. Each test is independent and reports pass/fail/warn
@@ -12,11 +13,12 @@ Covers:
   1. Connectivity           - basic non-tool completion
   2. Reasoning presence     - thinking pass fires and reaches a correct answer
   3. Small-budget risk      - regression check for the known "small max_tokens
-                              can return empty content" behavior (see
-                              docker-compose.qwen3.8.yml's SIMPLIFICATION PASS
-                              note) — reported as a warning, not a failure,
-                              since it's a known/accepted tradeoff, not a bug
-                              this script is meant to catch as new.
+                              can return empty content" behavior of reasoning
+                              models (see docker-compose.qwen3.8.yml's
+                              SIMPLIFICATION PASS note) — reported as a
+                              warning, not a failure, since it's a known/
+                              accepted tradeoff, not a bug this script is
+                              meant to catch as new.
   4. Single tool call       - one unambiguous prompt, one correct tool
   5. Tool selection breadth - one prompt per tool in the palette
   6. Multi-turn tool context - a synthetic tool result must actually be used
@@ -26,27 +28,58 @@ Covers:
   8. Streaming reconstruction - tool_calls delta chunks must reassemble into
                               valid JSON (a real code path Cline/opencode use
                               that a non-streaming test would miss)
+  9. Vision                 - a generated solid-red 64x64 PNG (stdlib zlib+struct,
+                              sent as a data: URI image_url part) must be
+                              described as "red" (whole word, in the final
+                              content, not the reasoning; another basic colour
+                              word without "red" is a FAIL). The colour is
+                              fixed, so a model could guess it: this proves the
+                              endpoint accepts and processes images, not
+                              fine-grained vision. A text-only model/endpoint
+                              that rejects images (HTTP 4xx other than 401/403,
+                              or an error mentioning image/vision/multimodal)
+                              gets a WARN, not a FAIL; use --skip-vision to
+                              leave the test out entirely.
+ 10. Decode throughput      - one generation (max_tokens 1024); reports
+                              completion_tokens, finish_reason, wall time and
+                              tok/s. The count INCLUDES reasoning tokens and
+                              the wall time includes prefill/TTFT, so a
+                              reasoning model usually hits the 1024 cap
+                              (finish_reason=length). Purely informational:
+                              PASS whenever tokens were produced, never fails
+                              on speed.
 
 Usage:
     python3 test-agentic-capabilities.py [--base-url URL] [--api-key KEY]
-                                          [--model MODEL] [--output FILE]
+                                          [--model MODEL] [--output FILE] [--skip-vision]
 
 Example:
+    # default model: qwen3.8-flash-next (Flash-Next, the default stack since 2026-10-22)
+    python3 scripts/test-agentic-capabilities.py
+    # Qwen3.8-27B (ROLLBACK stack; restore the ROLLBACK blocks in litellm-config.yaml first):
     python3 scripts/test-agentic-capabilities.py --model qwen3.8-27b
+    # through agentgateway:
+    python3 scripts/test-agentic-capabilities.py --base-url http://localhost:4100/v1
+    # ...or directly against the engine (vLLM has no --api-key, any token works):
+    python3 scripts/test-agentic-capabilities.py --base-url http://localhost:8301/v1 --model qwen3.8-flash-next
     python3 scripts/test-agentic-capabilities.py --model qwen3.6-35b-a3b --output ai-workspace/reports/agentic-test-qwen36.json
 """
 
 import argparse
+import base64
 import json
 import os
+import re
+import struct
 import sys
 import time
 import urllib.request
 import urllib.error
+import zlib
 from pathlib import Path
 
 DEFAULT_BASE_URL = "http://localhost:4000/v1"
-DEFAULT_MODEL = "qwen3.8-27b"
+DEFAULT_MODEL = "qwen3.8-flash-next"
 REQUEST_TIMEOUT = 120  # seconds per request
 
 
@@ -171,7 +204,8 @@ def chat_completion(base_url, api_key, model, messages, tools=None, tool_choice=
             if payload_str == "[DONE]":
                 break
             chunk = json.loads(payload_str)
-            choice = chunk.get("choices", [{}])[0]
+            # agentgateway ends a stream with a usage-only chunk whose choices is []
+            choice = (chunk.get("choices") or [{}])[0]
             delta = choice.get("delta", {})
             if choice.get("finish_reason"):
                 finish_reason = choice["finish_reason"]
@@ -273,8 +307,9 @@ def test_small_budget_reasoning_risk(base_url, api_key, model):
         if not content and finish_reason == "length":
             return ("Small-budget reasoning risk", "WARN",
                     "Known behavior reproduced: max_tokens=20 returned empty content "
-                    "(all tokens spent on reasoning). Not a new bug — see "
-                    "docker-compose.qwen3.8.yml's SIMPLIFICATION PASS note. "
+                    "(all tokens spent on reasoning). Not a new bug — a known trait "
+                    "of reasoning models (see the SIMPLIFICATION PASS note in "
+                    "docker-compose.qwen3.8.yml). "
                     "Flag this to harness authors if they use small per-call token budgets.")
         return "Small-budget reasoning risk", "PASS", f"content={content!r}, finish_reason={finish_reason}"
     except Exception as e:
@@ -424,6 +459,90 @@ def test_streaming_tool_call(base_url, api_key, model):
         return "Streaming reconstruction", "FAIL", f"{type(e).__name__}: {e}"
 
 
+def make_solid_png(width, height, rgb):
+    """Build a solid-color 8-bit RGB PNG with the standard library only."""
+    def chunk(tag, data):
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    row = b"\x00" + bytes(rgb) * width  # filter type 0 (None) + pixels
+    raw = row * height
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit, color type 2 (RGB)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+VISION_OTHER_COLORS = ("green", "blue", "yellow", "black", "white", "orange",
+                       "purple", "pink", "gray", "grey", "brown")
+VISION_REJECT_HINTS = ("image", "vision", "multimodal", "multi-modal", "multi_modal")
+
+
+def test_vision(base_url, api_key, model):
+    try:
+        png = make_solid_png(64, 64, (255, 0, 0))
+        data_uri = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+        resp = chat_completion(
+            base_url, api_key, model,
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": "What single color fills this image? Answer with one word."},
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ]}],
+            max_tokens=1024,  # reasoning tokens come first
+        )
+        content = get_content(resp) or ""
+        finish_reason = resp.get("choices", [{}])[0].get("finish_reason")
+        lowered = content.lower()
+        has_red = re.search(r"\bred\b", lowered) is not None
+        other = [c for c in VISION_OTHER_COLORS if re.search(rf"\b{c}\b", lowered)]
+        if has_red and not other:
+            return "Vision", "PASS", f"Identified the 64x64 red PNG: {content.strip()[:60]!r}"
+        if has_red:
+            return "Vision", "FAIL", (f"Answer names red but also {other}: ambiguous, "
+                                      f"content={content[:80]!r}, finish_reason={finish_reason}")
+        return "Vision", "FAIL", f"Expected 'red', got content={content[:80]!r}, finish_reason={finish_reason}"
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            body = ""
+        # 401/403 are auth problems, not a statement about image support.
+        if 400 <= e.code < 500 and e.code not in (401, 403):
+            return ("Vision", "WARN",
+                    f"Model/endpoint does not accept images (HTTP {e.code}): {body[:160]!r}")
+        if any(h in body.lower() for h in VISION_REJECT_HINTS):
+            return ("Vision", "WARN",
+                    f"Model/endpoint does not accept images (HTTP {e.code}): {body[:160]!r}")
+        return "Vision", "FAIL", f"HTTPError {e.code}: {body[:160]!r}"
+    except Exception as e:
+        msg = f"{type(e).__name__}: {e}"
+        if any(h in str(e).lower() for h in VISION_REJECT_HINTS):
+            return "Vision", "WARN", f"Model/endpoint does not accept images ({msg[:160]})"
+        return "Vision", "FAIL", msg
+
+
+def test_decode_throughput(base_url, api_key, model):
+    """Informational only: PASS whenever any tokens were generated. The token
+    count includes reasoning tokens, so it often stops at the max_tokens cap."""
+    try:
+        start = time.time()
+        resp = chat_completion(
+            base_url, api_key, model,
+            messages=[{"role": "user", "content":
+                       "Write a ~400-word technical explanation of how a hash map handles collisions."}],
+            max_tokens=1024,
+        )
+        elapsed = time.time() - start
+        tokens = (resp.get("usage") or {}).get("completion_tokens") or 0
+        finish_reason = resp.get("choices", [{}])[0].get("finish_reason")
+        if tokens > 0:
+            return ("Decode throughput", "PASS",
+                    f"completion_tokens={tokens} (incl. reasoning), finish_reason={finish_reason}, "
+                    f"elapsed={elapsed:.1f}s, ~{tokens / elapsed:.1f} tok/s (includes prefill/TTFT)")
+        return "Decode throughput", "FAIL", f"No completion_tokens in usage: {resp.get('usage')}"
+    except Exception as e:
+        return "Decode throughput", "FAIL", f"{type(e).__name__}: {e}"
+
+
 # =============================================================================
 # Runner
 # =============================================================================
@@ -437,6 +556,8 @@ ALL_TESTS = [
     test_multiturn_tool_context,
     test_no_hallucinated_tool_call,
     test_streaming_tool_call,
+    test_vision,
+    test_decode_throughput,
 ]
 
 
@@ -459,6 +580,8 @@ def main():
     parser.add_argument("--api-key", default=os.environ.get("LITELLM_MASTER_KEY"))
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--output", help="Optional path to save a JSON report")
+    parser.add_argument("--skip-vision", action="store_true",
+                        help="Skip the Vision test (for text-only models/endpoints)")
     args = parser.parse_args()
 
     api_key = args.api_key or load_api_key_from_env_file(Path(__file__).resolve().parent.parent)
@@ -470,7 +593,10 @@ def main():
     print(f"Testing model={args.model!r} via {args.base_url}\n")
 
     results = []
-    for test_fn in ALL_TESTS:
+    tests = [t for t in ALL_TESTS if not (args.skip_vision and t is test_vision)]
+    if args.skip_vision:
+        print("(Vision test skipped: --skip-vision)\n")
+    for test_fn in tests:
         start = time.time()
         name, status, detail = test_fn(args.base_url, api_key, args.model)
         elapsed = time.time() - start
