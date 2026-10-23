@@ -84,9 +84,10 @@
 #     restart.sh / model-switch.sh know this stack (target "flash", the default) and
 #     stop_all brings this stack and the standalone agentgateway down; the launcher is
 #     scripts/flash-next-compose.sh.
-#   - Still open: the prices are PROVISIONAL (21 decode intervals / 12,482 output
-#     tokens), re-derive after about a day of real use; local-image-gen-mcp must stay
-#     off while this stack runs (headroom is tight: MemAvailable ~6-8 GiB idle); whether
+#   - Prices were re-derived from real agent traffic on 2026-10-22 (input 3.19e-11,
+#     output 8.69e-8; see litellm-config.yaml and CHANGELOG).
+#   - Still open: local-image-gen-mcp stays off while this stack runs (user decision
+#     U-3; at 0.75 MemAvailable is ~21 GiB idle, not measured with image-gen up); whether
 #     seccomp=unconfined is really needed is untested; no live switch round trip has
 #     been run (the switch scripts were verified by DRY_RUN=1 only).
 # =============================================================================

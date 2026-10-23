@@ -57,37 +57,64 @@ def test_empty_input():
 
 
 LARGE = None
+UNIFORM = None
 
 
 def large():
+    """Realistic, skewed traffic (a few hot paths)."""
     global LARGE
     if LARGE is None:
         LARGE = generate(200_000, seed=42)
     return LARGE
 
 
-def timed(fn, *args):
-    start = time.perf_counter()
-    result = fn(*args)
-    return result, time.perf_counter() - start
+def uniform():
+    """200k lines spread evenly over 3,000 normalised paths: no hot paths for a linear scan to get lucky on."""
+    global UNIFORM
+    if UNIFORM is None:
+        rng = random.Random(99)
+        UNIFORM = [f"2026-10-23T00:00:00Z GET /svc{i % 3000}/item/{rng.randint(1, 10**6)} "
+                   f"{rng.choice((200, 200, 200, 404, 500))} {rng.randint(1, 900)}ms" for i in range(200_000)]
+        rng.shuffle(UNIFORM)
+    return UNIFORM
+
+
+def best_of_3(fn, *args):
+    """Best wall time of up to 3 runs (stops early once under the limit), so a busy machine doesn't fail a fast solution."""
+    best, result = None, None
+    for _ in range(3):
+        start = time.perf_counter()
+        result = fn(*args)
+        elapsed = time.perf_counter() - start
+        best = elapsed if best is None else min(best, elapsed)
+        if best < 3.0:
+            break
+    return result, best
+
+
+def check(fn, expected, *args):
+    result, seconds = best_of_3(fn, *args)
+    if isinstance(expected, list):
+        result = [tuple(x) for x in result]
+    assert result == expected
+    assert seconds < 3.0, f"{fn.__name__} took {seconds:.2f}s"
 
 
 def test_top_paths_fast_and_correct():
-    lines = large()
-    result, seconds = timed(analyze.top_paths, lines, 25)
-    assert [tuple(x) for x in result] == ref_top(lines, 25)
-    assert seconds < 3.0, f"top_paths took {seconds:.2f}s"
+    check(analyze.top_paths, ref_top(large(), 25), large(), 25)
+
+
+def test_top_paths_fast_on_uniform_traffic():
+    check(analyze.top_paths, ref_top(uniform(), 25), uniform(), 25)
 
 
 def test_p95_fast_and_correct():
-    lines = large()
-    result, seconds = timed(analyze.p95_by_path, lines)
-    assert result == ref_all(lines)[1]
-    assert seconds < 3.0, f"p95_by_path took {seconds:.2f}s"
+    check(analyze.p95_by_path, ref_all(large())[1], large())
+
+
+def test_p95_fast_on_uniform_traffic():
+    check(analyze.p95_by_path, ref_all(uniform())[1], uniform())
 
 
 def test_error_rate_fast_and_correct():
-    lines = large()
-    result, seconds = timed(analyze.error_rate_by_path, lines)
-    assert result == ref_all(lines)[2]
-    assert seconds < 3.0, f"error_rate_by_path took {seconds:.2f}s"
+    check(analyze.error_rate_by_path, ref_all(large())[2], large())

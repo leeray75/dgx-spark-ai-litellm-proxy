@@ -204,18 +204,18 @@ build it had never been validated against — reproducing the identical CUDA-gra
 
 ### 4c. Flash-Next fails at startup: free memory below the target (startup memory check, cache drop)
 
-**Problem**: The Flash-Next engine (`--gpu-memory-utilization 0.80`) exits at startup with a free-memory error, or `./scripts/model-switch.sh flash` aborts with "MemFree is … GiB, below the 105 GiB".
+**Problem**: The Flash-Next engine (`--gpu-memory-utilization 0.75`, 0.80 until 2026-10-22) exits at startup with a free-memory error, or `./scripts/model-switch.sh flash` aborts with "MemFree is … GiB, below the 105 GiB".
 
-**Cause**: vLLM refuses to start when free memory is below `gpu-memory-utilization × total` (0.80 × 121.7 GiB ≈ 97 GiB). On GB10 the CUDA free figure tracks `MemFree`, **not** `MemAvailable`, so page cache (for example from downloading the 96 GiB checkpoint) makes it fail even when `MemAvailable` is high. Measured 2026-10-22: after the download and with the 27B stack down, `MemFree` was only 9.7 GiB while `MemAvailable` was 117.6 GiB.
+**Cause**: vLLM refuses to start when free memory is below `gpu-memory-utilization × total` (0.75 × 121.7 GiB ≈ 91.3 GiB). On GB10 the CUDA free figure tracks `MemFree`, **not** `MemAvailable`, so page cache (for example from downloading the 96 GiB checkpoint) makes it fail even when `MemAvailable` is high. Measured 2026-10-22: after the download and with the 27B stack down, `MemFree` was only 9.7 GiB while `MemAvailable` was 117.6 GiB.
 
 **Solution**:
 
 1. Check: `grep -E 'MemFree|MemAvailable' /proc/meminfo`
-2. Stop everything that holds GPU memory first (`./scripts/restart.sh clean` or the target stack's `down`; `docker stop local-image-gen-mcp` — it holds ~18 GB and Flash-Next at 0.80 cannot share).
+2. Stop everything that holds GPU memory first (`./scripts/restart.sh clean` or the target stack's `down`; `docker stop local-image-gen-mcp` — it holds ~18 GB and Flash-Next is not run alongside it, user decision U-3).
 3. Drop the page cache (needs sudo, run it yourself): `sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'`
 4. Re-run `./scripts/restart.sh flash` (does steps 2-3 itself) or `./scripts/model-switch.sh flash`. Preview with `DRY_RUN=1` (any non-empty value other than `0` is a dry run).
    `model-switch.sh flash` has two gates: a **pre-stop** gate that aborts (exit 2) *before stopping anything* when page cache (Cached+Buffers) is ≥ 10 GiB (121.7 GiB total − 105 GiB needed free − ~5 GiB baseline ≈ 11.7, rounded down; dropping caches while the old stack runs is harmless), and a **post-stop** gate that aborts (exit 3) when `MemFree` is still under 105 GiB after the old stack was stopped. On exit 3 the previous stack is **already stopped and nothing is serving**: the message prints the sudo drop command and the exact re-run command.
-5. Do not lower `--gpu-memory-utilization` as a workaround: 0.70 leaves less KV cache than one 262,144-token sequence (see `docs/specs/qwen38-flash-next-stack/research.md` R-7), and changing it invalidates the compile cache.
+5. Do not lower `--gpu-memory-utilization` as a workaround: 0.75 already leaves only 888,648 KV tokens (3.39x a 262,144-token request), going much lower eats into what one long request needs (see `docs/specs/qwen38-flash-next-stack/research.md` R-7), and changing it invalidates the compile cache.
 
 ---
 

@@ -17,6 +17,9 @@ Consequences: ``-2^2 == -4``, ``2^-1 == 0.5``, ``2^3^2 == 512``, ``2*-3 == -6``,
   grammar: empty input, unknown characters, missing operands, unbalanced parentheses,
   trailing tokens, malformed numbers;
 * ``ZeroDivisionError`` for division by zero.
+
+There is no nesting limit beyond Python's own: at least 100 levels of nested parentheses (and long
+chains such as ``-`` repeated 100 times) must evaluate normally.
 """
 
 

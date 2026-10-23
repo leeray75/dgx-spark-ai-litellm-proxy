@@ -16,11 +16,11 @@ This guide compares the supported LLMs for the **NVIDIA DGX Spark (Blackwell GB1
 | **Context Window** | 262,144 tokens native |
 | **Image** | `eugr/spark-vllm-b12x` pinned by digest (b12x kernels), compose file `docker-compose.qwen3.8-flash-next.yml` (run via `scripts/flash-next-compose.sh`) |
 | **Port** | 8301 |
-| **GPU memory** | `--gpu-memory-utilization 0.80` (~97 GiB); model loading 70.32 GiB, KV cache 28.03 GiB = 1,491,188 tokens (5.69x for 262,144-token requests) |
+| **GPU memory** | `--gpu-memory-utilization 0.75` (~91 GiB; 0.80 until 2026-10-22); model loading 70.32 GiB, KV cache 16.7 GiB = 888,648 tokens (3.39x for 262,144-token requests); host RAM ~108 GB in use, ~21 GiB available |
 | **Tool calling / reasoning** | `qwen3_xml` tool parser (verified: proper OpenAI `tool_calls`, streaming included), `qwen3` reasoning parser; `qwen3.8-flash-next-nothink` disables thinking via `chat_template_kwargs.enable_thinking: false` |
 | **Boot** | First boot ≤ 18 m 39 s (b12x JIT compile); needs `MemFree` ≥ ~105 GiB at start (drop caches first); `local-image-gen-mcp` must stay stopped |
 | **Throughput (measured 2026-10-22)** | ~38 tok/s median in vLLM's own log across the Phase 2 tests (max 48.7); 45.5 tok/s direct and 47.7 tok/s via LiteLLM in the 1024-token test (27B live median: ~21 tok/s) |
-| **Electricity cost (provisional)** | 0.90 J/output token at ~36.7 W → $0.0742 per 1M output tokens, $0.00126 per 1M counted input tokens at $0.298/kWh (21 decode intervals / 12,482 output tokens; re-derive after about a day of real use) |
+| **Electricity cost** | Measured on agent traffic 2026-10-22/23: ~1 J/output token at ~43 W (0.93–1.05 depending on batching) → LiteLLM/Langfuse prices 8.69e-8 per output token and 3.19e-11 per counted input token at $0.298/kWh (agent context is mostly prefix-cache hits, so input is nearly free). Lifetime sample: 323 decode intervals / 84.7k output tokens; see `ai-workspace/reports/qwen3.8-flash-next-performance-2026-10-23.md` |
 
 LiteLLM aliases: `qwen3.8-flash-next`, `qwen3.8-flash-next-nothink`, and `claude-qwen3.8-flash-next` (the `claude` prefix is what makes Claude Code's `/model` picker list it). agentgateway (`:4100`) serves the first two. Full facts and test results: `docs/specs/qwen38-flash-next-stack/research.md` (R-2 – R-14).
 
@@ -456,7 +456,7 @@ nemotron-embed-engine:
 ### Choose Qwen3.8-Flash-Next-FP4-Local (default) if:
 
 - You want the **fastest local chat model on this box**: ~38 tok/s median in the 2026-10-22 tests (45-48 tok/s in single-request runs), about 1.8-2.3x the 27B's live ~21 tok/s, with vision and 262K context
-- You can keep `local-image-gen-mcp` **off** (no memory headroom beside it at 0.80) and accept tight host memory (`MemAvailable` ~7-8 GiB idle) and a ~19-minute cold boot
+- You can keep `local-image-gen-mcp` **off** (user decision U-3; it holds ~18 GB) and accept a ~19-minute cold boot (~5 minutes with warm caches)
 
 ### Choose Qwen3.8-27B-NVFP4 (rollback) if:
 

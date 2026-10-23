@@ -45,6 +45,7 @@ def test_error_message_is_helpful():
 
 def test_deep_nesting():
     assert evaluate("(" * 100 + "1" + ")" * 100) == 1.0
+    assert evaluate("-" * 100 + "1") == 1.0
 
 
 def test_no_eval_or_parsing_shortcuts():

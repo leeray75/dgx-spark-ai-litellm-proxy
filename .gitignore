@@ -45,3 +45,11 @@ qdrant-storage/
 __pycache__/
 *.pyc
 agentgateway/data/
+*.bak-*
+
+# Evaluation runs (scripts/eval-agentic-tasks.py, scripts/eval-hard-problems.py)
+# The results JSON and each attempt's final workspace are kept; the last-green
+# checkpoint copies and half-written temp files are not.
+*.json.tmp
+ai-workspace/reports/agentic-eval-*/**/last_green/
+.pytest_cache/

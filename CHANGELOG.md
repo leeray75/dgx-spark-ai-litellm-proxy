@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Agentic eval harness: better tools, context compaction, repeat runs, automated checks** (2026-10-23), from the
+  first run's grading. New tools `show_diff`, `delete_file`, `run_python` (snippet in the same sandbox); `edit_file`
+  echoes the edited lines and `write_file`/`edit_file` syntax-check Python; `run_tests` puts the summary and failing
+  tests first and has `show_output`; `finish` is refused once while files changed since the last passing full run.
+  Every tool result shows "turn N/M" with wrap-up reminders near the limit; a passing full run checkpoints the
+  workspace and grading scores both the final state and that checkpoint. Context compaction like Goose/Cline: past
+  `--compact-at-tokens` (48k) older tool outputs and large tool arguments become stubs, keeping the last 8 turns.
+  `--repeats` (default 3) with per-task pass rate and score spread in `meta.per_task`; `meta.sampling` records the
+  engine's defaults (the harness sends none). Mechanical checks per attempt: scratch files, removed original tests,
+  original tests on the final code, diff size vs. reference, first green turn, tool error rate. Stricter hidden
+  tests: log analyzer adds evenly spread traffic and best-of-3 timing; memo cache repeats its race tests; the
+  evaluator spec states the 100-level nesting requirement (with a test).
 - **Agentic task evaluation harness** (2026-10-23). `scripts/eval-agentic-tasks.py` gives a served model (default
   `qwen3.8-flash-next` through agentgateway) a small repository and a real task, with deterministic tools and no
   shell: `list_files`, `read_file`, `outline` (`ast`-based), `grep`, `write_file`, `edit_file`, `check_syntax`,

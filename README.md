@@ -154,6 +154,17 @@ Full stack restart with system cache clearing (for NVIDIA DGX Spark Blackwell GB
 
 > **Note:** The restart script includes the "Ritual" — clearing system caches via `sudo sync; echo 3 > /proc/sys/vm/drop_caches` — to ensure optimal performance on DGX Spark. For Flash-Next it is required, not just nice to have: vLLM refuses to start unless `MemFree` is about 105 GiB or more (see `docs/troubleshooting.md`). `model-switch.sh flash` has no cache drop and aborts with the exact command if `MemFree` is too low. `local-image-gen-mcp` stays off while Flash-Next runs.
 
+### eval-agentic-tasks.py
+
+Agentic coding evaluation of the served model through agentgateway: small repository tasks, harness-style tools (no shell), sandboxed test runs and hidden-test grading.
+
+```bash
+python3 scripts/eval-agentic-tasks.py --self-test     # check the tasks (no model calls)
+python3 scripts/eval-agentic-tasks.py --repeats 1     # one attempt per task (~30-45 min)
+```
+
+`scripts/eval-hard-problems.py` is the older single-prompt variant (no tools).
+
 ## Access Points
 
 | Service | URL | Port |

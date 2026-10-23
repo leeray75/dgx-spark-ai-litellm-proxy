@@ -27,7 +27,9 @@ def run_threads(n, target):
     return results, errors
 
 
-def test_single_load_for_concurrent_callers():
+# Races can pass by luck on a broken implementation, so the race tests repeat.
+@pytest.mark.parametrize("round_", range(3))
+def test_single_load_for_concurrent_callers(round_):
     calls = []
     lock = threading.Lock()
 
@@ -92,10 +94,16 @@ def test_stats_exact_under_contention():
     old = sys.getswitchinterval()
     sys.setswitchinterval(1e-6)
     try:
-        memo = Memo(lambda k: k)
-        memo.get("hot")
-        run_threads(16, lambda i: [memo.get("hot") for _ in range(2000)])
-        assert memo.stats() == {"hits": 32000, "misses": 1, "loads": 1}
+        for _ in range(5):
+            memo = Memo(lambda k: k)
+            memo.get("hot")
+            run_threads(16, lambda i: [memo.get("hot") for _ in range(2000)])
+            assert memo.stats() == {"hits": 32000, "misses": 1, "loads": 1}
+            # misses/loads race too: many threads miss the same cold key at once
+            cold = Memo(lambda k: time.sleep(0.05) or k)
+            run_threads(16, lambda i: [cold.get(j) for j in range(20)])
+            s = cold.stats()
+            assert s["loads"] == 20 and s["hits"] + s["misses"] == 320, s
     finally:
         sys.setswitchinterval(old)
 

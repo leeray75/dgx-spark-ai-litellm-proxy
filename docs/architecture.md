@@ -135,8 +135,8 @@ All services connect via a Docker bridge network called `ai-bridge`:
 
 - **Size**: 125B total / ~6B active parameters (MoE: 512 experts, 10 routed + 1 shared), plus a 51B n-gram (PLE) embedding table that stays on NVMe (`VLLM_PLE_TABLE_MEMORY=disk`) and a 4B MTP head
 - **Architecture**: 48 layers (36 Gated DeltaNet + 12 Qwen Sparse Attention), vision encoder included
-- **Serving**: community `eugr/spark-vllm-b12x` image with b12x kernels, NVIDIA's DGX Spark recipe, `--gpu-memory-utilization 0.80`, FP8 KV cache, MTP with 4 speculative tokens, `--tool-call-parser qwen3_xml`, `--reasoning-parser qwen3`
-- **Memory**: model loading 70.32 GiB, KV cache 28.03 GiB = 1,491,188 tokens (5.69x concurrency at 262,144 tokens); `local-image-gen-mcp` must stay stopped; startup needs `MemFree` ≥ ~105 GiB
+- **Serving**: community `eugr/spark-vllm-b12x` image with b12x kernels, NVIDIA's DGX Spark recipe, `--gpu-memory-utilization 0.75` (recipe: 0.80), FP8 KV cache, MTP with 4 speculative tokens, `--tool-call-parser qwen3_xml`, `--reasoning-parser qwen3`
+- **Memory**: model loading 70.32 GiB, KV cache 16.7 GiB = 888,648 tokens (3.39x concurrency at 262,144 tokens; `--max-num-seqs 8`); `local-image-gen-mcp` must stay stopped; startup needs `MemFree` ≥ ~105 GiB
 - **Performance**: ~38 tok/s median in the 2026-10-22 tests; first boot ≤ 18 m 39 s
 - **Routing**: LiteLLM aliases `qwen3.8-flash-next`, `qwen3.8-flash-next-nothink`, `claude-qwen3.8-flash-next` (Claude Code `/model` discovery); `default_fallbacks: ["qwen3.8-flash-next"]`; agentgateway provider `vllm-qwen38-flash`
 - **Details**: `docker-compose.qwen3.8-flash-next.yml` header and `docs/specs/qwen38-flash-next-stack/research.md`
