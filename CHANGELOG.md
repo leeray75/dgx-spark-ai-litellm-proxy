@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Agentic task evaluation harness** (2026-10-23). `scripts/eval-agentic-tasks.py` gives a served model (default
+  `qwen3.8-flash-next` through agentgateway) a small repository and a real task, with deterministic tools and no
+  shell: `list_files`, `read_file`, `outline` (`ast`-based), `grep`, `write_file`, `edit_file`, `check_syntax`,
+  `run_tests`, `finish`. Code runs only in `run_tests` and grading, inside `eval-sandbox:py312`
+  (`scripts/eval-tasks/sandbox/Dockerfile`: `--network none`, read-only root, tmpfs, 1 GiB, 2 CPUs, no
+  capabilities; the workspace is streamed in as a tar). Five tasks in `scripts/eval-tasks/` (bug fix, CLI feature,
+  performance, concurrency, implement-from-spec), each with hidden tests and a reference solution; `--self-test`
+  checks hidden tests fail on the starting code and pass on the reference. Results JSON is saved after every task
+  (`--resume`). First run (`ai-workspace/reports/agentic-eval-qwen3.8-flash-next-20261023T051241Z.json`, graded in
+  `...-20261023-grading.md`): 78/85 hidden tests, 3/5 tasks fully passing, 58 min; three tasks hit the 40-turn limit
+  after finishing the work by turn 15-20. `scripts/eval-hard-problems.py` (single-prompt problem set) saves after
+  every answer, resumes (`--resume`, `--rerun-truncated`), and defaults to 32,768 output tokens.
 - **Qwen3.8-Flash-Next stack: routing, scripts and prices (Phase 3 of `docs/specs/qwen38-flash-next-stack/`)**
   (2026-10-22). New `qwen3.8-flash-next-nothink` (same `litellm_params` as `qwen3.8-flash-next` plus
   `extra_body.chat_template_kwargs.enable_thinking: false`, which the checkpoint's chat template honors) and
