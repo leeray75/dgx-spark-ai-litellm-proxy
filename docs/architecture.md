@@ -9,54 +9,49 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 > based on NVIDIA Blackwell architecture, optimized for large language model inference.
 
 ```
-┌───────────────────────────────────────────────────────────────────────────┐
-│                           External Services                                │
-│  ┌────────────┐  ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐ │
-│  │   Clients  │  │   SDKs       │  │   Scripts        │  │   Other      │ │
-│  │  (API)     │  │  (Langfuse)  │  │  (Monitoring)    │  │   Services   │ │
-│  └──────┬─────┘  └──────┬───────┘  └────────┬─────────┘  └──────┬───────┘ │
-│         │                │                   │                   │         │
-│         └────────────────┼───────────────────┼───────────────────┘         │
-│                          │                   │                             │
-│                    ┌─────▼─────┐    ┌───────▼────────┐                    │
-│                    │  Langfuse │    │   LiteLLM      │                    │
-│                    │   Web UI  │    │    Proxy       │                    │
-│                    │  (3000)   │    │   (4000)       │                    │
-│                    └─────┬─────┘    └───────┬────────┘                    │
-│                          │                   │                             │
-│                          └───────────────────┼─────────────────────────────┘
-│                                              │
-│                    ┌─────────────────────────┼─────────────────────────────┐
-│                    │                         │                             │
-│          ┌─────────▼─────────┐   ┌───────────▼────────────┐               │
-│          │  Langfuse Worker  │   │  Flash-Next/27B/3.6    │               │
-│          │  (Async Events)   │   │  (vLLM, 8301 —         │               │
-│          │                   │   │   mutually exclusive)  │               │
-│          └─────────┬─────────┘   └───────────┬────────────┘               │
-│                    │                         │                             │
-│          ┌─────────▼─────────┐   ┌───────────▼────────────┐               │
-│          │  Langfuse Web     │   │   Embedding Engine     │               │
-│          │  (Observability)  │   │   (vLLM, 8302)         │               │
-│          └─────────┬─────────┘   └────────────────────────┘               │
-│                    │             ┌────────────────────────┐               │
-│          ┌─────────▼─────────┐   │   Qwen3-Coder Engine   │               │
-│          │  PostgreSQL       │   │   (vLLM, 8300)         │               │
-│          │  (Langfuse +      │   └────────────────────────┘               │
-│          │   LiteLLM DBs)    │                                            │
-│          └─────────┬─────────┘                                            │
-│                    │                                                      │
-│          ┌─────────▼─────────┐   ┌────────────────────────┐               │
-│          │  ClickHouse       │   │   Nemotron Engine      │               │
-│          │  (Analytics)      │   │   (vLLM, 8200)         │               │
-│          └─────────┬─────────┘   └────────────────────────┘               │
-│                    │                                                      │
-│          ┌─────────▼─────────┐   ┌────────────────────────┐               │
-│          │  Redis            │   │   MinIO                │               │
-│          │  (Event Queue)    │   │   (Blob Storage)       │               │
-│          └───────────────────┘   └────────────────────────┘               │
-│                                                                           │
-└───────────────────────────────────────────────────────────────────────────┘
+               ┌────────────────────────────────────────────────┐
+               │  Clients: Claude Code, Goose, Cline, SDKs, ... │
+               └───────┬────────────────────────────────┬───────┘
+                       │ OpenAI + Anthropic APIs        │
+          ┌────────────▼─────────────┐   ┌──────────────▼───────────┐
+          │ LiteLLM Proxy      :4000 │   │ agentgateway (trial)     │
+          │ virtual keys, spend,     │   │ API :4100  UI :4101      │
+          │ routing, Redis cache     │   │ same key as LiteLLM      │
+          └─┬──────────┬─────────────┘   └─────────────┬──────────┬─┘
+            │          │                               │          │
+            │          └───────────────┬───────────────┘          │
+            │                          │ inference                │
+            │       ┌──────────────────┼──────────────────┐       │
+            │       │                  │                  │       │
+            │ ┌─────▼──────────┐ ┌─────▼──────────┐ ┌─────▼─────┐ │
+            │ │ Qwen3.8-Flash- │ │ Embedding      │ │ Anthropic │ │
+            │ │ Next engine    │ │ engine  :8302  │ │ API       │ │
+            │ │ :8301 (b12x)   │ │ Nemotron-3-    │ │ claude-*  │ │
+            │ │                │ │ Embed-1B       │ │ (cloud)   │ │
+            │ └────────────────┘ └────────────────┘ └───────────┘ │
+            │ traces (Langfuse SDK)             traces (OTLP)     │
+ ┌──────────▼─────────────────────────────────────────────────────▼──────────┐
+ │ Langfuse v3                                                               │
+ │  Web UI + ingestion :3000 ──► Redis queue ──► Worker :3030 ──► ClickHouse │
+ │                                                                 + MinIO   │
+ │                                                                           │
+ │  PostgreSQL :5432     ClickHouse :8123     Redis :6379      MinIO :9090   │
+ │  langfuse + litellm   traces, scores       queue + LiteLLM  event payloads│
+ │  databases                                 prompt cache     console :9091 │
+ └───────────────────────────────────────────────────────────────────────────┘
 ```
+
+This is the default stack (`docker-compose.qwen3.8-flash-next.yml`, started with `./scripts/flash-next-compose.sh up -d`).
+Only one chat engine runs at a time. The other compose files swap the engine box and leave the rest in place:
+
+| Stack | Chat engine | Port |
+|---|---|---|
+| `docker-compose.qwen3.8.yml` (rollback) | Qwen3.8-27B-NVFP4 (+ embedding engine, `local-image-gen-mcp` behind agentgateway's `/mcp/image-gen`) | 8301 |
+| `docker-compose.qwen3.6.yml` (retired rollback) | Qwen3.6-35B-A3B-NVFP4 (+ embedding engine) | 8301 |
+| `docker-compose.yml` | Qwen3-Coder-Next-FP8 | 8300 |
+| `docker-compose.nemotron.yml` | Nemotron-3-Super-120B (+ Qdrant 6333/6334) | 8200 |
+
+Under the 27B and qwen3.6 stacks agentgateway runs from the standalone `docker-compose.agentgateway.yml`.
 
 ## Component Details
 
