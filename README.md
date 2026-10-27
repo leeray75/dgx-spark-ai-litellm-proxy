@@ -12,46 +12,54 @@ An OpenAI-compatible LLM proxy running on **NVIDIA DGX Spark (Blackwell GB10)** 
 - **Langfuse v3 Observability**: Full traceability, cost tracking, and analytics
 - **vLLM Inference**: High-performance GPU inference with FlashAttention-3 support
 - **LiteLLM Proxy**: Virtual key management, spend tracking, rate limiting
+- **agentgateway (trial)**: Second OpenAI/Anthropic-compatible gateway on port 4100 alongside LiteLLM, same key, traces to Langfuse over OTLP
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         User / Client                             │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                  ┌────────────▼────────────┐
-                  │   LiteLLM Proxy         │
-                  │   (port 4000)           │
-                  └────────────┬────────────┘
-                               │
-        ┌──────────────────────┼──────────────────────┐
-        │                      │                      │
-┌───────▼───────┐   ┌──────────▼──────────┐   ┌───────▼───────┐
-│Qwen3.6/3.8 Eng│   │ Embedding Engine    │   │  Langfuse UI  │
-│(port 8301, one│   │   (port 8302)       │   │  (port 3000)  │
-│  at a time)   │   │                     │   │               │
-└───────────────┘   └─────────────────────┘   └───────────────┘
-        │
-        │                ┌──────────────┐
-        │                │Nemotron Engine│
-        │                │ (port 8200)  │
-        │                └──────────────┘
-        └────────────────────────────────┘
-                               │
-                  ┌────────────▼─────────────┐
-                  │    Langfuse Infrastructure│
-                  │  ┌──────────┐ ┌──────────┐│
-                  │  │PostgreSQL│ │ ClickHouse││
-                  │  │  (5432)  │ │  (8123)  ││
-                  │  └──────────┘ └──────────┘│
-                  │  ┌──────────┐ ┌──────────┐│
-                  │  │   Redis  │ │   MinIO  ││
-                  │  │  (6379)  │ │  (9090)  ││
-                  │  └──────────┘ └──────────┘│
-                  │  └────────────────────────┘
-                  └───────────────────────────┘
+               ┌────────────────────────────────────────────────┐
+               │  Clients: Claude Code, Goose, Cline, SDKs, ... │
+               └───────┬────────────────────────────────┬───────┘
+                       │ OpenAI + Anthropic APIs        │
+          ┌────────────▼─────────────┐   ┌──────────────▼───────────┐
+          │ LiteLLM Proxy      :4000 │   │ agentgateway (trial)     │
+          │ virtual keys, spend,     │   │ API :4100  UI :4101      │
+          │ routing, Redis cache     │   │ same key as LiteLLM      │
+          └─┬──────────┬─────────────┘   └─────────────┬──────────┬─┘
+            │          │                               │          │
+            │          └───────────────┬───────────────┘          │
+            │                          │ inference                │
+            │       ┌──────────────────┼──────────────────┐       │
+            │       │                  │                  │       │
+            │ ┌─────▼──────────┐ ┌─────▼──────────┐ ┌─────▼─────┐ │
+            │ │ Qwen3.8-Flash- │ │ Embedding      │ │ Anthropic │ │
+            │ │ Next engine    │ │ engine  :8302  │ │ API       │ │
+            │ │ :8301 (b12x)   │ │ Nemotron-3-    │ │ claude-*  │ │
+            │ │                │ │ Embed-1B       │ │ (cloud)   │ │
+            │ └────────────────┘ └────────────────┘ └───────────┘ │
+            │ traces (Langfuse SDK)             traces (OTLP)     │
+ ┌──────────▼─────────────────────────────────────────────────────▼──────────┐
+ │ Langfuse v3                                                               │
+ │  Web UI + ingestion :3000 ──► Redis queue ──► Worker :3030 ──► ClickHouse │
+ │                                                                 + MinIO   │
+ │                                                                           │
+ │  PostgreSQL :5432     ClickHouse :8123     Redis :6379      MinIO :9090   │
+ │  langfuse + litellm   traces, scores       queue + LiteLLM  event payloads│
+ │  databases                                 prompt cache     console :9091 │
+ └───────────────────────────────────────────────────────────────────────────┘
 ```
+
+This is the default stack (`docker-compose.qwen3.8-flash-next.yml`, started with `./scripts/flash-next-compose.sh up -d`).
+Only one chat engine runs at a time. The other compose files swap the engine box and leave the rest in place:
+
+| Stack | Chat engine | Port |
+|---|---|---|
+| `docker-compose.qwen3.8.yml` (rollback) | Qwen3.8-27B-NVFP4 (+ embedding engine, `local-image-gen-mcp` behind agentgateway's `/mcp/image-gen`) | 8301 |
+| `docker-compose.qwen3.6.yml` (retired rollback) | Qwen3.6-35B-A3B-NVFP4 (+ embedding engine) | 8301 |
+| `docker-compose.yml` | Qwen3-Coder-Next-FP8 | 8300 |
+| `docker-compose.nemotron.yml` | Nemotron-3-Super-120B (+ Qdrant 6333/6334) | 8200 |
+
+Under the 27B and qwen3.6 stacks agentgateway runs from the standalone `docker-compose.agentgateway.yml`.
 
 ## Prerequisites
 
