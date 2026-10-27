@@ -67,7 +67,7 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 | Langfuse Web | `langfuse/langfuse:3` | 3000 | Web UI + public ingestion API |
 | Langfuse Worker | `langfuse/langfuse-worker:3` | 3030 | Async event processor |
 | PostgreSQL | `postgres:16-alpine` | 5432 | Auth, projects, API keys, config |
-| ClickHouse | `clickhouse/clickhouse-server` | 8123 | Traces, observations, scores |
+| ClickHouse | `clickhouse/clickhouse-server:26.8.36.3` (26.8 LTS) | 8123 | Traces, observations, scores |
 | Redis | `redis:7-alpine` | 6379 | Event queue + cache |
 | MinIO | `minio/minio` | 9090 | S3-compatible blob storage |
 
@@ -76,19 +76,19 @@ specifically designed for the **NVIDIA DGX Spark (Blackwell GB10)** workstation.
 | Service | Image | Port | Model | Quantization |
 |---------|-------|------|-------|--------------|
 | Qwen3.8-Flash-Next Engine (default since 2026-10-22) | `eugr/spark-vllm-b12x@sha256:03a95654…` (pinned) | 8301 | Qwen3.8-Flash-Next-FP4-Local | NVFP4 `csf` (modelopt_mixed) |
-| Qwen3.8-27B Engine (rollback) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.8-27B-NVFP4 | NVFP4+FP8 (compressed-tensors) |
-| Qwen3.6 Engine (retired rollback) | `vllm/vllm-openai:nightly` | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 (ModelOpt) |
-| Embedding Engine | `vllm/vllm-openai:nightly` | 8302 | nemotron-3-embed-1b-nvfp4 | NVFP4 |
+| Qwen3.8-27B Engine (rollback) | `vllm/vllm-openai@sha256:20a52b80…` (Sep 15 nightly, pinned) | 8301 | Qwen3.8-27B-NVFP4 | NVFP4+FP8 (compressed-tensors) |
+| Qwen3.6 Engine (retired rollback) | `vllm/vllm-openai@sha256:20a52b80…` (Sep 15 nightly, pinned) | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 (ModelOpt) |
+| Embedding Engine | `vllm/vllm-openai:nightly-00b6c4c5…` (Oct 26 nightly, pinned; rollback stacks use their own pin) | 8302 | nemotron-3-embed-1b-nvfp4 | NVFP4 |
 | Qwen3-Coder Engine | `vllm/vllm-openai:v0.19.1-cu130` | 8300 | Qwen3-Coder-Next-FP8 | FP8 |
 | Nemotron Engine | `vllm/vllm-openai:v0.18.1-cu130` | 8200 | Nemotron-3-Super-120B | NVFP4 |
 
-> **Note:** Each compose stack pins a different vLLM image — do not swap these. Nemotron requires `v0.18.1` (not `v0.19.1`), and Qwen3-Coder uses `v0.19.1` for GDN/Mamba stability. The Qwen3.8-27B and Qwen3.6 stacks both use `nightly` for FlashInfer persistent cache support. The Flash-Next stack (default) needs the community `eugr/spark-vllm-b12x` image (upstream vLLM cannot load its NVFP4 `csf` scale encoding), pinned by digest; its embedding engine still uses `nightly`. All three chat engines share port 8301 — only one runs at a time, same as every other pair of chat engines here. The Flash-Next compose file also contains its own agentgateway (ports 4100/4101); it is run through `scripts/flash-next-compose.sh`, which derives `AGW_LANGFUSE_BASIC_AUTH` from `.env`.
+> **Note:** Each compose stack pins a different vLLM image — do not swap these. Nemotron requires `v0.18.1` (not `v0.19.1`), and Qwen3-Coder uses `v0.19.1` for GDN/Mamba stability. The Qwen3.8-27B and Qwen3.6 stacks both use a nightly build (for FlashInfer persistent cache support), pinned by digest since 2026-10-27. The Flash-Next stack (default) needs the community `eugr/spark-vllm-b12x` image (upstream vLLM cannot load its NVFP4 `csf` scale encoding), pinned by digest; its embedding engine is pinned to a dated nightly tag. All three chat engines share port 8301 — only one runs at a time, same as every other pair of chat engines here. The Flash-Next compose file also contains its own agentgateway (ports 4100/4101); it is run through `scripts/flash-next-compose.sh`, which derives `AGW_LANGFUSE_BASIC_AUTH` from `.env`.
 
 ### Proxy Layer
 
 | Service | Image | Port | Purpose |
 |---------|-------|------|---------|
-| LiteLLM | `ghcr.io/berriai/litellm:main-latest` | 4000 | OpenAI-compatible API + routing |
+| LiteLLM | `ghcr.io/berriai/litellm:v1.106.4` (pinned; never `main-latest`) | 4000 | OpenAI-compatible API + routing |
 
 ## Network Architecture
 
