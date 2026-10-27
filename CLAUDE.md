@@ -101,7 +101,7 @@ docker compose logs -f <service>   # e.g. litellm, qwen3-6-35b-nvfp4-engine
 | `docker-compose.yml` | Qwen3-Coder-Next-FP8 stack |
 | `docker-compose.qwen3.8-flash-next.yml` | Qwen3.8-Flash-Next-FP4-Local stack (**default** since 2026-10-22; includes its own agentgateway). Run it via `scripts/flash-next-compose.sh` |
 | `scripts/flash-next-compose.sh` | Wrapper for the Flash-Next compose file: sources `.env`, derives `AGW_LANGFUSE_BASIC_AUTH` (refuses if the Langfuse keys are empty), `mkdir -p agentgateway/data`, then `exec docker compose -f docker-compose.qwen3.8-flash-next.yml "$@"` |
-| `scripts/check-engine-image.sh` | Notify-only check for newer builds of every digest-pinned image in `docker-compose*.yml` (compares the pin with the image's `:latest`; `TRACK_TAG` overrides). Run by the systemd **user** timer `engine-image-check.timer` (~3 min after boot + daily; units in `~/.config/systemd/user/`). A newer build writes `~/.local/state/engine-image-check/notice`, which a marked block at the end of `~/.bashrc` prints in every interactive shell. `show` / `dismiss` subcommands; history in `check.log` beside the notice. Never pulls or edits anything — adopting a build is a manual digest edit + `flash-next-compose.sh up -d` |
+| `scripts/check-engine-image.sh` | Notify-only check for newer builds of every digest-pinned image in `docker-compose*.yml` (compares the pin with the image's `:latest`; `TRACK_TAG` overrides; `image:` lines containing `check-engine-image: skip` are ignored — used for the frozen rollback-stack pins). Run by the systemd **user** timer `engine-image-check.timer` (~3 min after boot + daily; units in `~/.config/systemd/user/`). A newer build writes `~/.local/state/engine-image-check/notice`, which a marked block at the end of `~/.bashrc` prints in every interactive shell. `show` / `dismiss` subcommands; history in `check.log` beside the notice. Never pulls or edits anything — adopting a build is a manual digest edit + `flash-next-compose.sh up -d` |
 | `docker-compose.qwen3.8.yml` | Qwen3.8-27B-NVFP4 stack (rollback since 2026-10-22 — see note above) |
 | `scripts/eval-agentic-tasks.py` + `scripts/eval-tasks/` | Agentic coding evaluation through agentgateway: 5 repository tasks (each `TASK.md`, `workspace/`, `hidden_tests/`, `reference/`), deterministic tools with **no shell**, code executed only in the `eval-sandbox:py312` image (`scripts/eval-tasks/sandbox/Dockerfile`, `--network none`, read-only root). See "Evaluating models" below |
 | `scripts/eval-hard-problems.py` | Single-prompt hard-problem set (no tools); saves after every answer, `--resume`, `--rerun-truncated`; default 32,768 output tokens |
@@ -166,20 +166,39 @@ Each compose file pins a different vLLM image — do not swap these:
 
 | Compose file | vLLM image | Notes |
 |---|---|---|
-| `docker-compose.qwen3.8-flash-next.yml` | `eugr/spark-vllm-b12x@sha256:03a95654…` (arm64, CUDA 13.0.2, created 2026-10-15) | Pinned by digest (= `:latest` on 2026-10-22). Required: upstream vLLM cannot load this checkpoint's `csf` NVFP4 scale encoding. The embedding engine in the same file still uses `vllm/vllm-openai:nightly` |
-| `docker-compose.qwen3.6.yml` | `vllm/vllm-openai:nightly` (ARM64) | Currently digest `sha256:95bed119…` (vLLM `0.26.1rc1.dev1102+ge9d1398d9`) — see the pinning warning below |
-| `docker-compose.qwen3.8.yml` | `vllm/vllm-openai:nightly` (ARM64) | Same digest as above — confirmed via live registry introspection to register `Qwen3_5ForConditionalGeneration`, the architecture class this checkpoint's config.json declares |
+| `docker-compose.qwen3.8-flash-next.yml` | `eugr/spark-vllm-b12x@sha256:03a95654…` (arm64, CUDA 13.0.2, created 2026-10-15) | Pinned by digest (= `:latest` on 2026-10-22). Required: upstream vLLM cannot load this checkpoint's `csf` NVFP4 scale encoding. The embedding engine in the same file is pinned to `vllm/vllm-openai:nightly-00b6c4c5…` (Oct 26 nightly, vLLM `0.32.1rc1.dev505+g00b6c4c56`, since 2026-10-27; previous build kept as `vllm/vllm-openai:rollback-20261027`) |
+| `docker-compose.qwen3.6.yml` | `vllm/vllm-openai@sha256:20a52b80…` (ARM64) | Pinned 2026-10-27 to the Sep 15 nightly (vLLM `0.29.1rc1.dev128+gcd10ed6f9`), what `:nightly` resolved to from 2026-09-15 on. Not boot-tested on this stack (retired). The older `95bed119…` (0.26.1rc1) build was deleted |
+| `docker-compose.qwen3.8.yml` | `vllm/vllm-openai@sha256:20a52b80…` (ARM64) | Same pin; this is the build the 27B ran from 2026-09-15 until it became the rollback (including the 2026-10-18 0.54 right-sizing) |
 | `docker-compose.yml` | `vllm/vllm-openai:v0.19.1-cu130` | Pinned for GDN/Mamba stability |
 | `docker-compose.nemotron.yml` | `vllm/vllm-openai:v0.18.1-cu130` | Nemotron requires v0.18.1, not v0.19.1 |
 
-> **⚠️ Tag-pinning warning (2026-08-24 incident):** `docker-compose.qwen3.6.yml` and `docker-compose.qwen3.8.yml`
-> both reference the **mutable** `:nightly` tag, not a pinned digest. A `docker pull vllm/vllm-openai:nightly` run
-> to investigate qwen3.8's throughput silently upgraded qwen3.6's engine too on its next restart — to a build it
-> had never been validated against — and reproduced the exact same `gpu_memory_utilization` OOM qwen3.8 hit
-> (fixed the same way: `0.4` → `0.6` on both files). **Before running `docker pull vllm/vllm-openai:nightly`
-> again, know that it affects both stacks simultaneously.** Neither file has a recorded pinned digest yet
-> (`docker-compose.qwen3.6.yml`'s header still has an unfilled "Pinned working digest:" placeholder) — pinning
-> both to the current known-working digest is the real fix, not yet done.
+> **Tag pinning (2026-08-24 incident, fixed 2026-10-27):** the 27B and qwen3.6 stacks used to reference the
+> **mutable** `:nightly` tag, so a `docker pull vllm/vllm-openai:nightly` for one stack silently changed the
+> other's engine on its next restart and reproduced the `gpu_memory_utilization` OOM. Since 2026-10-27 **no compose
+> file uses a floating tag** for an engine, LiteLLM or ClickHouse: the rollback stacks are pinned by digest, the
+> embedding engine by a dated nightly tag, LiteLLM to `v1.106.4` and ClickHouse to `26.8.36.3` (26.8 LTS) in every
+> file. Langfuse (`:3`), Postgres (`16-alpine`), Redis (`7-alpine`) and MinIO still track a major line. Keep it that
+> way: adopt a new build by editing the pin, never by pulling a floating tag. Never put LiteLLM back on
+> `main-latest` (LiteLLM 1.82.7/1.82.8 on PyPI were a supply-chain compromise in March 2026). The rollback stacks'
+> digest lines carry `check-engine-image: skip`, because `vllm/vllm-openai:latest` is the stable release, not a newer
+> nightly.
+
+### Updating service images
+
+These are container updates, not OS updates (the dgx-safe-update checklist is for apt/driver/firmware). Done this
+way on 2026-10-27 (`ai-workspace/summary-reports/service-image-updates-2026-10-27.md`):
+
+1. Change the pins in **every** compose file that uses the image (they share container names and volumes).
+2. Back up Postgres first: `docker exec langfuse-postgres pg_dumpall -U <POSTGRES_USER> | gzip > …`. LiteLLM and
+   Langfuse run one-way Prisma migrations on start, so the old version can't run on the migrated DB.
+3. Pull **named services only**, never a bare `pull`:
+   `./scripts/flash-next-compose.sh pull litellm langfuse-web langfuse-worker postgres redis clickhouse nemotron-embed-engine`
+   (leave out `qwen3-8-flash-next-fp4-engine`; its digest is already local).
+4. `./scripts/flash-next-compose.sh down` (no `-v`), drop caches (`sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'`,
+   the embed engine alone needs ~12.2 GiB `MemFree` and Flash-Next ~91 GiB), then `up -d`. Measured: everything healthy
+   ~9 min after `up -d` (Flash-Next 107 s weight load, ~6 min to healthy; LiteLLM starts only once it is).
+5. Check: LiteLLM logs `All migrations have been successfully applied.`; `curl localhost:3000/api/public/health`; a chat,
+   an Anthropic `/v1/messages` and an embeddings request through port 4000; new rows in ClickHouse `traces`.
 
 ## Model Names and Aliases
 

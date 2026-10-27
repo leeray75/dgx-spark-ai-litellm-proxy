@@ -45,9 +45,12 @@ case "${1:-check}" in
     *) echo "usage: $0 [check|show|dismiss]" >&2; exit 2 ;;
 esac
 
-# Every image pinned by digest in any compose file, deduplicated: "<repo> <digest> <file>"
-mapfile -t pins < <(grep -HoE '^\s*image:\s*[^ #]+@sha256:[0-9a-f]{64}' docker-compose*.yml 2>/dev/null \
-    | sed -E 's/^([^:]+):\s*image:\s*([^@ ]+)@sha256:([0-9a-f]{64})$/\2 \3 \1/' | sort -u -k1,2)
+# Every image pinned by digest in any compose file, deduplicated: "<repo> <digest> <file>".
+# Lines carrying "check-engine-image: skip" are frozen on purpose (e.g. the rollback
+# stacks' vllm/vllm-openai nightly, whose :latest is the stable release, not a newer nightly).
+mapfile -t pins < <(grep -HE '^\s*image:\s*[^ #]+@sha256:[0-9a-f]{64}' docker-compose*.yml 2>/dev/null \
+    | grep -v 'check-engine-image: skip' \
+    | sed -E 's/^([^:]+):\s*image:\s*([^@ ]+)@sha256:([0-9a-f]{64}).*$/\2 \3 \1/' | sort -u -k1,2)
 
 if [[ ${#pins[@]} -eq 0 ]]; then
     log "no digest-pinned images found"; rm -f "$NOTICE"; exit 0

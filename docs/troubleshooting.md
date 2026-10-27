@@ -195,10 +195,9 @@ build it had never been validated against — reproducing the identical CUDA-gra
    ```bash
    docker exec qwen3-6-35b-nvfp4-engine python3 -c "import vllm; print(vllm.__version__)"
    ```
-3. **Before running `docker pull vllm/vllm-openai:nightly` for any reason** (including investigating a different
-   compose file entirely), know that it affects both `docker-compose.qwen3.6.yml` and
-   `docker-compose.qwen3.8.yml` simultaneously, since neither is pinned to a digest yet. Re-test both stacks after
-   any such pull, not just the one you were originally investigating.
+3. **Fixed at the root on 2026-10-27:** both files now pin `vllm/vllm-openai@sha256:20a52b80…` (the Sep 15
+   nightly, vLLM `0.29.1rc1.dev128+gcd10ed6f9`), so a `docker pull vllm/vllm-openai:nightly` no longer changes
+   either stack. To move a stack to a newer build, edit its pin and re-test that stack.
 
 ---
 

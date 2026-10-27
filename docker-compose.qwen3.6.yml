@@ -114,7 +114,10 @@
 #           Confirmed-GOOD (as of this revision): 0.23.1rc1.dev1042+g8e981630c —
 #           persistent autotune cache active, confirmed via log line
 #           "Using FlashInfer autotune cache file: ..." and cache-save on exit.
-#           Pinned working digest: <record here once confirmed>
+#           Pinned working digest (2026-10-27, both engines in this file):
+#             vllm/vllm-openai@sha256:20a52b807cef7a3be15d2174d293b5642d437615b20b5930d78a927e709e6bb6
+#             (Sep 15 nightly, vLLM 0.29.1rc1.dev128+gcd10ed6f9 — what :nightly
+#             resolved to from 2026-09-15 on; not boot-tested on this stack)
 #
 # Model:    nvidia/Qwen3.6-35B-A3B-NVFP4
 #           35B MoE (3B activated), NVFP4 quantized via NVIDIA Model Optimizer
@@ -489,7 +492,7 @@ services:
   # ClickHouse — OLAP store for Langfuse traces, observations, and scores
   # ---------------------------------------------------------------------------
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:26.8.36.3  # pinned 2026-10-27 (26.8 LTS; was :latest = 26.7.3.19)
     container_name: langfuse-clickhouse
     networks:
       - ai-bridge
@@ -722,7 +725,7 @@ services:
   # NVIDIA DGX Spark — GB10 Superchip (128GB unified memory)
   # ---------------------------------------------------------------------------
   qwen3-6-35b-nvfp4-engine:
-    image: vllm/vllm-openai:nightly
+    image: vllm/vllm-openai@sha256:20a52b807cef7a3be15d2174d293b5642d437615b20b5930d78a927e709e6bb6  # pinned 2026-10-27: the :nightly these stacks last ran (Sep 15 build, vLLM 0.29.1rc1.dev128+gcd10ed6f9); check-engine-image: skip
     platform: linux/arm64
     container_name: qwen3-6-35b-nvfp4-engine
     networks:
@@ -916,7 +919,7 @@ services:
   # 4096 matches NVIDIA's official deployment example.
   # ---------------------------------------------------------------------------
   nemotron-embed-engine:
-    image: vllm/vllm-openai:nightly
+    image: vllm/vllm-openai@sha256:20a52b807cef7a3be15d2174d293b5642d437615b20b5930d78a927e709e6bb6  # pinned 2026-10-27: the :nightly these stacks last ran (Sep 15 build, vLLM 0.29.1rc1.dev128+gcd10ed6f9); check-engine-image: skip
     platform: linux/arm64
     container_name: nemotron-embed-engine
     networks:
@@ -957,7 +960,7 @@ services:
   # LiteLLM Proxy — unified OpenAI-compatible API + Langfuse OTEL tracing
   # ---------------------------------------------------------------------------
   litellm:
-    image: ghcr.io/berriai/litellm:main-latest
+    image: ghcr.io/berriai/litellm:v1.106.4  # pinned 2026-10-27 (was main-latest = 1.82.6); never float: 1.82.7/1.82.8 were a supply-chain compromise
     container_name: litellm-proxy
     networks:
       - ai-bridge

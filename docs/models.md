@@ -39,7 +39,7 @@ LiteLLM aliases: `qwen3.8-flash-next`, `qwen3.8-flash-next-nothink`, and `claude
 | **Context Window** | 262K tokens native |
 | **VRAM Required** | ~22-25 GiB weights (varies by checkpoint tested; see `docker-compose.qwen3.8.yml` for exact boot-log figures) |
 | **Model ID** | `nvidia/Qwen3.8-27B-NVFP4` |
-| **vLLM Image** | `vllm/vllm-openai:nightly` |
+| **vLLM Image** | `vllm/vllm-openai@sha256:20a52b80…` (Sep 15 nightly, vLLM 0.29.1rc1, pinned 2026-10-27) |
 | **Port** | 8301 |
 
 #### Key Features
@@ -105,7 +105,7 @@ practice (see `docker-compose.qwen3.6.yml`'s header and CHANGELOG.md).
 | **Context Window** | 262K tokens (configurable, 131K default in LiteLLM) |
 | **VRAM Required** | ~26 GB (weights) |
 | **Model ID** | `nvidia/Qwen3.6-35B-A3B-NVFP4` |
-| **vLLM Image** | `vllm/vllm-openai:nightly` |
+| **vLLM Image** | `vllm/vllm-openai@sha256:20a52b80…` (Sep 15 nightly, vLLM 0.29.1rc1, pinned 2026-10-27) |
 | **Port** | 8301 |
 
 #### Key Features
@@ -148,7 +148,7 @@ practice (see `docker-compose.qwen3.6.yml`'s header and CHANGELOG.md).
 | **Context Window** | 262K tokens |
 | **VRAM Required** | ~118 GB |
 | **Model ID** | `Qwen/Qwen3-Coder-Next-FP8` |
-| **vLLM Image** | `vllm/vllm-openai:nightly` |
+| **vLLM Image** | `vllm/vllm-openai:v0.19.1-cu130` |
 | **Port** | 8300 |
 
 #### Key Features
@@ -182,7 +182,7 @@ practice (see `docker-compose.qwen3.6.yml`'s header and CHANGELOG.md).
 | **Context Window** | 262K tokens |
 | **VRAM Required** | ~80 GB |
 | **Model ID** | `nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4` |
-| **vLLM Image** | `vllm/vllm-openai:nightly` |
+| **vLLM Image** | `vllm/vllm-openai:v0.18.1-cu130` |
 | **Port** | 8200 |
 
 #### Key Features
@@ -215,8 +215,8 @@ practice (see `docker-compose.qwen3.6.yml`'s header and CHANGELOG.md).
 | **Context Window** | 4096 tokens (configured; model supports up to 32768) |
 | **VRAM Required** | ~1-2 GB (NVFP4 quantized) |
 | **Model ID** | `nvidia/Nemotron-3-Embed-1B-NVFP4` |
-| **vLLM Image** | `vllm/vllm-openai:nightly` (requires vLLM 0.25.0+; 0.23.x/0.24.x broken) |
-| **Port** | 8302 (Qwen3.8/3.6 stacks) |
+| **vLLM Image** | `vllm/vllm-openai:nightly-00b6c4c5…` in the Flash-Next stack (Oct 26 nightly, vLLM 0.32.1rc1); the Sep 15 digest pin in the 27B/qwen3.6 stacks (requires vLLM 0.25.0+; 0.23.x/0.24.x broken) |
+| **Port** | 8302 (Flash-Next, Qwen3.8 and Qwen3.6 stacks) |
 
 #### Key Features
 
@@ -280,7 +280,7 @@ NVIDIA's DGX Spark recipe, near-verbatim; the authoritative flag list and the de
 
 ```yaml
 qwen3-8-27b-nvfp4-engine:
-  image: vllm/vllm-openai:nightly
+  image: vllm/vllm-openai@sha256:20a52b807cef7a3be15d2174d293b5642d437615b20b5930d78a927e709e6bb6
   environment:
     HF_TOKEN: ${HF_TOKEN}
     TRITON_CACHE_DIR: /root/.triton/cache
@@ -347,7 +347,7 @@ section) for the full investigation across all three checkpoints tried.
 
 ```yaml
 qwen3-6-35b-nvfp4-engine:
-  image: vllm/vllm-openai:nightly
+  image: vllm/vllm-openai@sha256:20a52b807cef7a3be15d2174d293b5642d437615b20b5930d78a927e709e6bb6
   environment:
     HF_TOKEN: ${HF_TOKEN}
     TRITON_CACHE_DIR: /root/.triton/cache
@@ -398,7 +398,7 @@ acceptance-rate reasoning and benchmarking steps.
 
 ```yaml
 qwen3-coder-next-engine:
-  image: vllm/vllm-openai:nightly
+  image: vllm/vllm-openai:v0.19.1-cu130
   environment:
     HF_TOKEN: ${HF_TOKEN}
     VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
@@ -417,7 +417,7 @@ qwen3-coder-next-engine:
 
 ```yaml
 nemotron-engine:
-  image: vllm/vllm-openai:nightly
+  image: vllm/vllm-openai:v0.18.1-cu130
   environment:
     HF_TOKEN: ${HF_TOKEN}
     VLLM_NVFP4_GEMM_BACKEND: marlin
@@ -433,11 +433,11 @@ nemotron-engine:
     --tool-call-parser qwen3_coder
 ```
 
-### Embedding Model (docker-compose.qwen3.8.yml / docker-compose.qwen3.6.yml — identical config in both)
+### Embedding Model (docker-compose.qwen3.8-flash-next.yml / docker-compose.qwen3.8.yml / docker-compose.qwen3.6.yml)
 
 ```yaml
 nemotron-embed-engine:
-  image: vllm/vllm-openai:nightly
+  image: vllm/vllm-openai:nightly-00b6c4c565a8732c131e1f452d4a17803bb0842b  # Flash-Next stack; 27B/qwen3.6 stacks use the @sha256:20a52b80… pin
   environment:
     HF_TOKEN: ${HF_TOKEN}
   command:

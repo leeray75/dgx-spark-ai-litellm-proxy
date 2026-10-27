@@ -367,11 +367,12 @@
 #           Same digest already pulled/verified for the Unsloth checkpoint —
 #           sha256:95bed119f39e2414973cf7224df31c9a3ed213566138722346d7bd360edf842b
 #           (vLLM 0.26.1rc1.dev1102+ge9d1398d9). Registers
-#           Qwen3_5ForConditionalGeneration (already confirmed). STILL NOT
-#           PINNED — see CLAUDE.md's tag-pinning warning box (this exact
-#           digest collision already caused one real incident on qwen3.6,
-#           2026-08-24, documented in CHANGELOG.md and that file's
-#           corrections history item 18).
+#           Qwen3_5ForConditionalGeneration (already confirmed). The tag
+#           moved again on 2026-09-15 (Sep 15 nightly, vLLM
+#           0.29.1rc1.dev128+gcd10ed6f9), which this stack ran until it
+#           became the rollback on 2026-10-22. PINNED 2026-10-27 to that
+#           build: vllm/vllm-openai@sha256:20a52b807cef… (both engines in
+#           this file). The 95bed119 image was deleted the same day.
 #
 # Model:    Inferact/Qwen3.8-27B-NVFP4
 #           27B dense (NOT MoE), hybrid Gated-DeltaNet + Gated-Attention,
@@ -630,7 +631,7 @@ services:
   # ClickHouse — OLAP store for Langfuse traces, observations, and scores
   # ---------------------------------------------------------------------------
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:26.8.36.3  # pinned 2026-10-27 (26.8 LTS; was :latest = 26.7.3.19)
     container_name: langfuse-clickhouse
     networks:
       - ai-bridge
@@ -844,7 +845,7 @@ services:
   # the retired Unsloth checkpoint's full investigation history.
   # ---------------------------------------------------------------------------
   qwen3-8-27b-nvfp4-engine:
-    image: vllm/vllm-openai:nightly
+    image: vllm/vllm-openai@sha256:20a52b807cef7a3be15d2174d293b5642d437615b20b5930d78a927e709e6bb6  # pinned 2026-10-27: the :nightly these stacks last ran (Sep 15 build, vLLM 0.29.1rc1.dev128+gcd10ed6f9); check-engine-image: skip
     platform: linux/arm64
     container_name: qwen3-8-27b-nvfp4-engine
     networks:
@@ -1008,7 +1009,7 @@ services:
   # Source: https://huggingface.co/nvidia/Nemotron-3-Embed-1B-NVFP4
   # ---------------------------------------------------------------------------
   nemotron-embed-engine:
-    image: vllm/vllm-openai:nightly
+    image: vllm/vllm-openai@sha256:20a52b807cef7a3be15d2174d293b5642d437615b20b5930d78a927e709e6bb6  # pinned 2026-10-27: the :nightly these stacks last ran (Sep 15 build, vLLM 0.29.1rc1.dev128+gcd10ed6f9); check-engine-image: skip
     platform: linux/arm64
     container_name: nemotron-embed-engine
     networks:
@@ -1049,7 +1050,7 @@ services:
   # LiteLLM Proxy — unified OpenAI-compatible API + Langfuse OTEL tracing
   # ---------------------------------------------------------------------------
   litellm:
-    image: ghcr.io/berriai/litellm:main-latest
+    image: ghcr.io/berriai/litellm:v1.106.4  # pinned 2026-10-27 (was main-latest = 1.82.6); never float: 1.82.7/1.82.8 were a supply-chain compromise
     container_name: litellm-proxy
     networks:
       - ai-bridge

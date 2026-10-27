@@ -105,6 +105,20 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Service images updated and every floating tag pinned** (2026-10-27). LiteLLM `main-latest` (1.82.6) →
+  `v1.106.4`, never floating again (1.82.7/1.82.8 on PyPI were a supply-chain compromise, March 2026); its
+  migrations applied cleanly. ClickHouse `:latest` (26.7.3.19) → `26.8.36.3` (26.8 LTS), not 26.10. Langfuse
+  web/worker `:3` Aug 5 → 3.225.14; Postgres `16-alpine` and Redis `7-alpine` refreshed. Embedding engine
+  `vllm/vllm-openai:nightly` (Sep 15) → `nightly-00b6c4c5…` (Oct 26, vLLM 0.32.1rc1.dev505), healthy and serving
+  2048-dim embeddings. Pins applied to all five compose files that carry these services. The 27B and qwen3.6
+  stacks are now pinned to `vllm/vllm-openai@sha256:20a52b80…` (the Sep 15 nightly, vLLM 0.29.1rc1.dev128, which
+  `:nightly` resolved to from 2026-09-15), closing the 2026-08-24 shared-tag follow-up. Flash-Next engine,
+  agentgateway v1.6.0 and MinIO unchanged. `scripts/check-engine-image.sh` skips `image:` lines marked
+  `check-engine-image: skip` (the rollback pins: `vllm/vllm-openai:latest` is the stable release, so they'd raise a
+  false notice). CLAUDE.md gains an "Updating service images" procedure; image tables in CLAUDE.md,
+  `docs/architecture.md`, `docs/models.md` (which also listed `:nightly` for Qwen3-Coder and Nemotron, really
+  `v0.19.1-cu130` / `v0.18.1-cu130`) and `docs/troubleshooting.md` §4b updated. Report:
+  `ai-workspace/summary-reports/service-image-updates-2026-10-27.md`.
 - **Qwen3.8-Flash-Next-FP4-Local is the default stack; the `qwen3.8-27b` aliases are removed** (2026-10-22,
   explicit user decisions U-1 – U-4). `qwen3.8-27b` and `qwen3.8-27b-nothink` are gone from `litellm-config.yaml`
   and `agentgateway/config.yaml`, kept verbatim (with their measured-cost comments) as commented ROLLBACK blocks:
