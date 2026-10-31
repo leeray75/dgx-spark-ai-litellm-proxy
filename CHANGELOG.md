@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`scripts/test-reasoning-effort.py`** (2026-10-31). Renders a prompt through the engine's `/tokenize` and reports
+  which reasoning effort the chat template applies (server default and per-request overrides; no generation), then
+  sends an agentic-coding prompt with a stated requirement (Twitch OAuth callback must be https) through LiteLLM,
+  bypassing its Redis cache, and reports time, tokens, reasoning length and whether https was kept.
+  `--expect-default medium` fails if the default differs; `--skip-behavior` runs only the template check.
+- **`eval-agentic-tasks.py --chat-template-kwargs JSON`** (2026-10-31). Sent with every request and recorded in
+  `meta.chat_template_kwargs`; used to force `{"reasoning_effort":"xhigh"}` for the effort comparison below.
 - **Agentic eval harness: better tools, context compaction, repeat runs, automated checks** (2026-10-23), from the
   first run's grading. New tools `show_diff`, `delete_file`, `run_python` (snippet in the same sandbox); `edit_file`
   echoes the edited lines and `write_file`/`edit_file` syntax-check Python; `run_tests` puts the summary and failing
@@ -105,6 +112,22 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Flash-Next reasoning effort `xhigh` → `medium`** (2026-10-31, user decision). The checkpoint's chat template
+  takes `reasoning_effort` (`xhigh` default, `medium`, `low`; anything else raises). `xhigh` injects "validate key
+  assumptions, consider plausible alternatives" into the system prompt, which made agents re-verify requirements they
+  were given (e.g. researching stale Twitch docs instead of using the stated https callback). The engine now runs with
+  `--default-chat-template-kwargs '{"reasoning_effort":"medium"}'` (`docker-compose.qwen3.8-flash-next.yml`, listed
+  under deviations), which covers every LiteLLM alias and direct port-8301 use; agentgateway's `qwen3.8-flash-next`
+  also sets it under `defaults:` (not `overrides:`, so clients can still send `chat_template_kwargs.reasoning_effort`).
+  A top-level `reasoning_effort` request field is ignored by this template path; `-nothink` is unchanged. Measured:
+  - `test-reasoning-effort.py`, 3 trials via LiteLLM: median 216 s / 10,076 completion tokens at `xhigh` →
+    15.6 s / 945 at `medium`; https kept 3/3 both times.
+  - Agentic eval, direct to the engine, 1 attempt/task, 89 hidden tests: `medium` 89/89, 5/5 finished, 33,089 output
+    tokens, 12.7 min; `xhigh` 89/89, 4/5 finished (fix-memo-concurrency green on turn 18 but hit the 40-turn limit),
+    78,835 tokens, 32.3 min (`ai-workspace/reports/agentic-eval-effort-{medium,xhigh}-20261031T042830Z.json`).
+  - Engine recreated (only that container) with warm caches: healthy in ~6 min, KV cache 19.2 GiB / 1,021,187
+    tokens / 3.90x, 59.8 tok/s median generation afterwards. Through agentgateway, prompt-token counts match the
+    template: 13 (no kwargs = medium), 55 (client `xhigh`), 43 (client `low`).
 - **Service images updated and every floating tag pinned** (2026-10-27). LiteLLM `main-latest` (1.82.6) →
   `v1.106.4`, never floating again (1.82.7/1.82.8 on PyPI were a supply-chain compromise, March 2026); its
   migrations applied cleanly. ClickHouse `:latest` (26.7.3.19) → `26.8.36.3` (26.8 LTS), not 26.10. Langfuse

@@ -67,6 +67,16 @@
 #                                               crash-loop guard, ~/.claude/CLAUDE.md
 #                                               rule 4 — now covered by the
 #                                               dgx-safe-update pre-reboot check)
+#     --default-chat-template-kwargs '{"reasoning_effort":"medium"}'
+#                                               user decision 2026-10-30: the chat
+#                                               template defaults to xhigh, which injects
+#                                               "validate key assumptions, consider
+#                                               plausible alternatives" and made agents
+#                                               re-verify stated requirements. medium
+#                                               injects nothing. Template accepts only
+#                                               xhigh/medium/low (others raise); requests
+#                                               override via chat_template_kwargs.
+#                                               Check: scripts/test-reasoning-effort.py
 #     healthcheck via python3 /health           curl not relied on
 #     depends_on embedding engine healthy       see MEMORY BUDGET
 #   unverified (nobody has confirmed on this box):
@@ -435,6 +445,7 @@ services:
       --no-enable-flashinfer-autotune
       --mm-encoder-tp-mode data
       --reasoning-parser qwen3
+      --default-chat-template-kwargs '{"reasoning_effort":"medium"}'
       --tool-call-parser qwen3_xml
       --enable-auto-tool-choice
       --compilation-config '{"pass_config":{"fuse_act_quant":true}}'

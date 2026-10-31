@@ -508,6 +508,8 @@ def call_tool(ws, name, args):
 def chat(args, api_key, messages, max_tokens):
     payload = {"model": args.model, "messages": messages, "tools": TOOLS, "tool_choice": "auto",
                "max_tokens": max_tokens}
+    if args.chat_template_kwargs:
+        payload["chat_template_kwargs"] = args.chat_template_kwargs
     req = urllib.request.Request(f"{args.base_url}/chat/completions", data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
                                  method="POST")
@@ -844,6 +846,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--chat-template-kwargs", type=json.loads, metavar="JSON",
+                        help='Sent with every request, e.g. \'{"reasoning_effort":"xhigh"}\' (vLLM engine; '
+                             "default: none, so the engine's --default-chat-template-kwargs apply)")
     parser.add_argument("--only", help="Comma-separated task ids")
     parser.add_argument("--max-turns", type=int, default=40)
     parser.add_argument("--task-minutes", type=float, default=30, help="Wall-clock limit per task (checked between turns)")
@@ -909,7 +914,7 @@ def main():
                        "turn_max_tokens": args.turn_max_tokens, "task_max_tokens": args.task_max_tokens},
             "repeats": args.repeats,
             "context": {"compact_at_tokens": args.compact_at_tokens, "keep_recent_turns": args.keep_recent_turns},
-            "sampling": sampling,
+            "sampling": sampling, "chat_template_kwargs": args.chat_template_kwargs,
             "system_prompt": SYSTEM_PROMPT, "tools": [t["function"]["name"] for t in TOOLS],
             "attempts": len(records),
             "per_task": task_statistics(records),
