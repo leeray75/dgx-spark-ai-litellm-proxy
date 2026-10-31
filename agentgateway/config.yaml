@@ -17,7 +17,9 @@
 # Mapping from litellm-config.yaml:
 #   anthropic/* passthrough      → claude-* (Anthropic provider; see note there)
 #   qwen3.8-flash-next           → custom provider vllm-qwen38-flash, completions
-#                                  only (default stack since 2026-10-22)
+#                                  only (default stack since 2026-10-22);
+#                                  defaults.chat_template_kwargs.reasoning_effort
+#                                  medium (2026-10-31)
 #   qwen3.8-flash-next-nothink   → same + overrides.chat_template_kwargs
 #   qwen3.8-27b, -nothink        → REMOVED 2026-10-22 (user decision U-1); kept
 #                                  as a commented ROLLBACK block below. LiteLLM
@@ -222,9 +224,17 @@ llm:
       apiKey: "$ANTHROPIC_API_KEY"
 
   # ── Primary chat: nvidia/Qwen3.8-Flash-Next-FP4-Local (default 2026-10-22) ─
+  # reasoning_effort medium (2026-10-31): the chat template's own default is
+  # xhigh, which made agents over-verify. The engine already defaults to
+  # medium (--default-chat-template-kwargs); this states it here too. defaults,
+  # not overrides, so a client can still send chat_template_kwargs
+  # {"reasoning_effort": "xhigh"|"low"}. Only xhigh/medium/low are valid.
   - name: qwen3.8-flash-next
     provider:
       reference: vllm-qwen38-flash
+    defaults:
+      chat_template_kwargs:
+        reasoning_effort: medium
 
   # ── No-thinking alias (same engine) ────────────────────────────────────────
   - name: qwen3.8-flash-next-nothink
