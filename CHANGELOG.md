@@ -112,6 +112,13 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Shared service images updated** (2026-11-14, `docs/specs/service-image-updates-2026-11/` Phase 1). LiteLLM
+  `v1.106.4` → `v1.109.1` (cosign-verified against the key in BerriAI/litellm commit `e82a3c6`; migrations applied cleanly), ClickHouse
+  `26.8.36.3` → `26.8.37.168` (26.8 LTS patch), agentgateway `v1.6.0` → `v1.7.0`. Floating tags refreshed by pull:
+  Langfuse web and worker `:3` → 3.227.1, Postgres `16-alpine` → 16.16, Redis `7-alpine` (rebuilt 2026-11-09). Every
+  service was recreated one at a time with `up -d --no-deps`, so the inference engines were not restarted. The
+  verification battery matched the baseline (17/17 after; the baseline had one pre-existing agentgateway warning).
+  Rollback images are tagged `local/rollback:*-20261114`.
 - **Flash-Next engine image `03a95654…` → `19ab778d…`** (2026-11-14, Phase 4). The `:latest` build (created 2026-11-02)
   replaces the 2026-10-15 pin after the stdlib test suite passed on 3 baseline and 3 new runs and the LiteLLM run.
   Decode median 40.7 tok/s vs 42.4 tok/s baseline (-4%, inside the 10% rollback bound). Only the engine service was

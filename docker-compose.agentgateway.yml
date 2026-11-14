@@ -24,7 +24,7 @@ name: ai-litellm-agentgateway
 
 services:
   agentgateway:
-    image: cr.agentgateway.dev/agentgateway:v1.6.0
+    image: cr.agentgateway.dev/agentgateway:v1.7.0  # pinned 2026-11-14 (was v1.6.0)
     container_name: agentgateway
     user: "1000:1000"
     networks:

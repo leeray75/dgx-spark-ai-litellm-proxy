@@ -62,7 +62,7 @@ Under the 27B and qwen3.6 stacks agentgateway runs from the standalone `docker-c
 | Langfuse Web | `langfuse/langfuse:3` | 3000 | Web UI + public ingestion API |
 | Langfuse Worker | `langfuse/langfuse-worker:3` | 3030 | Async event processor |
 | PostgreSQL | `postgres:16-alpine` | 5432 | Auth, projects, API keys, config |
-| ClickHouse | `clickhouse/clickhouse-server:26.8.36.3` (26.8 LTS) | 8123 | Traces, observations, scores |
+| ClickHouse | `clickhouse/clickhouse-server:26.8.37.168` (26.8 LTS) | 8123 | Traces, observations, scores |
 | Redis | `redis:7-alpine` | 6379 | Event queue + cache |
 | MinIO | `minio/minio` | 9090 | S3-compatible blob storage |
 
@@ -83,7 +83,7 @@ Under the 27B and qwen3.6 stacks agentgateway runs from the standalone `docker-c
 
 | Service | Image | Port | Purpose |
 |---------|-------|------|---------|
-| LiteLLM | `ghcr.io/berriai/litellm:v1.106.4` (pinned; never `main-latest`) | 4000 | OpenAI-compatible API + routing |
+| LiteLLM | `ghcr.io/berriai/litellm:v1.109.1` (pinned; never `main-latest`) | 4000 | OpenAI-compatible API + routing |
 
 ## Network Architecture
 
