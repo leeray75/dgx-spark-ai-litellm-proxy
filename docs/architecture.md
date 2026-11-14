@@ -70,7 +70,7 @@ Under the 27B and qwen3.6 stacks agentgateway runs from the standalone `docker-c
 
 | Service | Image | Port | Model | Quantization |
 |---------|-------|------|-------|--------------|
-| Qwen3.8-Flash-Next Engine (default since 2026-10-22) | `eugr/spark-vllm-b12x@sha256:03a95654…` (pinned) | 8301 | Qwen3.8-Flash-Next-FP4-Local | NVFP4 `csf` (modelopt_mixed) |
+| Qwen3.8-Flash-Next Engine (default since 2026-10-22) | `eugr/spark-vllm-b12x@sha256:19ab778d…` (pinned 2026-11-14, built 2026-11-02; previous `03a95654…` kept locally as rollback) | 8301 | Qwen3.8-Flash-Next-FP4-Local | NVFP4 `csf` (modelopt_mixed) |
 | Qwen3.8-27B Engine (rollback) | `vllm/vllm-openai@sha256:20a52b80…` (Sep 15 nightly, pinned) | 8301 | Qwen3.8-27B-NVFP4 | NVFP4+FP8 (compressed-tensors) |
 | Qwen3.6 Engine (retired rollback) | `vllm/vllm-openai@sha256:20a52b80…` (Sep 15 nightly, pinned) | 8301 | Qwen3.6-35B-A3B-NVFP4 | NVFP4 (ModelOpt) |
 | Embedding Engine | `vllm/vllm-openai:nightly-00b6c4c5…` (Oct 26 nightly, pinned; rollback stacks use their own pin) | 8302 | nemotron-3-embed-1b-nvfp4 | NVFP4 |
@@ -132,6 +132,7 @@ All services connect via a Docker bridge network called `ai-bridge`:
 - **Architecture**: 48 layers (36 Gated DeltaNet + 12 Qwen Sparse Attention), vision encoder included
 - **Serving**: community `eugr/spark-vllm-b12x` image with b12x kernels, NVIDIA's DGX Spark recipe, `--gpu-memory-utilization 0.75` (recipe: 0.80), FP8 KV cache, MTP with 4 speculative tokens, `--tool-call-parser qwen3_xml`, `--reasoning-parser qwen3`
 - **Memory**: model loading 70.32 GiB, KV cache 16.7 GiB = 888,648 tokens (3.39x concurrency at 262,144 tokens; `--max-num-seqs 8`); `local-image-gen-mcp` must stay stopped; startup needs `MemFree` ≥ ~105 GiB
+  - *2026-11-14, `19ab778d…` (Phase 4):* the current engine image boots at the same `--gpu-memory-utilization 0.75` with model loading 70.32 GiB, KV cache 18.44 GiB = 981,083 tokens (3.74x concurrency at 262,144 tokens). The 16.7 GiB / 888,648 / 3.39x figures above are the 2026-10-22 `03a95654…` boot and are kept as history. See `docs/specs/qwen38-flash-next-stack/research.md` R-15.
 - **Performance**: ~38 tok/s median in the 2026-10-22 tests; first boot ≤ 18 m 39 s
 - **Routing**: LiteLLM aliases `qwen3.8-flash-next`, `qwen3.8-flash-next-nothink`, `claude-qwen3.8-flash-next` (Claude Code `/model` discovery); `default_fallbacks: ["qwen3.8-flash-next"]`; agentgateway provider `vllm-qwen38-flash`
 - **Details**: `docker-compose.qwen3.8-flash-next.yml` header and `docs/specs/qwen38-flash-next-stack/research.md`

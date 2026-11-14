@@ -361,9 +361,11 @@ services:
   # ---------------------------------------------------------------------------
   qwen3-8-flash-next-fp4-engine:
     # Community image required: upstream vLLM can't read the checkpoint's
-    # compressed NVFP4 scale format ("csf") yet. Pinned by digest (= :latest on 2026-10-22,
-    # arm64, CUDA 13.0.2, built 2026-10-15) — never use the mutable tag.
-    image: eugr/spark-vllm-b12x@sha256:03a956544e9f9b4b7ba91690469fbe7848bdbef29a7d2e0f5788368467bb3595
+    # compressed NVFP4 scale format ("csf") yet. Pinned by digest (= :latest on 2026-11-14,
+    # arm64, CUDA 13.0.2, built 2026-11-02; Phase 4) — never use the mutable tag.
+    # Rollback target (Phase 4 FR-P4-13): eugr/spark-vllm-b12x@sha256:03a956544e9f9b4b7ba91690469fbe7848bdbef29a7d2e0f5788368467bb3595
+    # (built 2026-10-15, arm64, CUDA 13.0.2; still in the local image store).
+    image: eugr/spark-vllm-b12x@sha256:19ab778dd57f019c44caf5df91a671cf688923d1ca9fa8ce92be0c9acb46d215
     platform: linux/arm64
     container_name: qwen3-8-flash-next-fp4-engine
     networks:

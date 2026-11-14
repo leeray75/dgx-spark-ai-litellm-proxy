@@ -167,7 +167,7 @@ Each compose file pins a different vLLM image — do not swap these:
 
 | Compose file | vLLM image | Notes |
 |---|---|---|
-| `docker-compose.qwen3.8-flash-next.yml` | `eugr/spark-vllm-b12x@sha256:03a95654…` (arm64, CUDA 13.0.2, created 2026-10-15) | Pinned by digest (= `:latest` on 2026-10-22). Required: upstream vLLM cannot load this checkpoint's `csf` NVFP4 scale encoding. The embedding engine in the same file is pinned to `vllm/vllm-openai:nightly-00b6c4c5…` (Oct 26 nightly, vLLM `0.32.1rc1.dev505+g00b6c4c56`, since 2026-10-27; previous build kept as `vllm/vllm-openai:rollback-20261027`) |
+| `docker-compose.qwen3.8-flash-next.yml` | `eugr/spark-vllm-b12x@sha256:19ab778d…` (arm64, CUDA 13.0.2, created 2026-11-02) | Pinned by digest (= `:latest` on 2026-11-14; Phase 4 swap from `03a95654…`, created 2026-10-15, kept locally as the rollback target). Required: upstream vLLM cannot load this checkpoint's `csf` NVFP4 scale encoding. The embedding engine in the same file is pinned to `vllm/vllm-openai:nightly-00b6c4c5…` (Oct 26 nightly, vLLM `0.32.1rc1.dev505+g00b6c4c56`, since 2026-10-27; previous build kept as `vllm/vllm-openai:rollback-20261027`) |
 | `docker-compose.qwen3.6.yml` | `vllm/vllm-openai@sha256:20a52b80…` (ARM64) | Pinned 2026-10-27 to the Sep 15 nightly (vLLM `0.29.1rc1.dev128+gcd10ed6f9`), what `:nightly` resolved to from 2026-09-15 on. Not boot-tested on this stack (retired). The older `95bed119…` (0.26.1rc1) build was deleted |
 | `docker-compose.qwen3.8.yml` | `vllm/vllm-openai@sha256:20a52b80…` (ARM64) | Same pin; this is the build the 27B ran from 2026-09-15 until it became the rollback (including the 2026-10-18 0.54 right-sizing) |
 | `docker-compose.yml` | `vllm/vllm-openai:v0.19.1-cu130` | Pinned for GDN/Mamba stability |
