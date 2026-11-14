@@ -148,7 +148,7 @@ services:
   # ClickHouse — OLAP store for Langfuse traces, observations, and scores
   # ---------------------------------------------------------------------------
   clickhouse:
-    image: clickhouse/clickhouse-server:26.8.36.3  # pinned 2026-10-27 (26.8 LTS; was :latest = 26.7.3.19)
+    image: clickhouse/clickhouse-server:26.8.37.168  # pinned 2026-11-14 (26.8 LTS; was 26.8.36.3)
     container_name: langfuse-clickhouse
     networks:
       - ai-bridge
@@ -508,7 +508,7 @@ services:
   # LiteLLM Proxy — unified OpenAI-compatible API + Langfuse OTEL tracing
   # ---------------------------------------------------------------------------
   litellm:
-    image: ghcr.io/berriai/litellm:v1.106.4  # pinned 2026-10-27 (was main-latest = 1.82.6); never float: 1.82.7/1.82.8 were a supply-chain compromise
+    image: ghcr.io/berriai/litellm:v1.109.1  # pinned 2026-11-14 (was v1.106.4); never float: 1.82.7/1.82.8 were a supply-chain compromise
     container_name: litellm-proxy
     networks:
       - ai-bridge
@@ -562,7 +562,7 @@ services:
   # driver/kernel update (see ~/.claude/CLAUDE.md).
   # ---------------------------------------------------------------------------
   agentgateway:
-    image: cr.agentgateway.dev/agentgateway:v1.6.0
+    image: cr.agentgateway.dev/agentgateway:v1.7.0  # pinned 2026-11-14 (was v1.6.0)
     container_name: agentgateway
     user: "1000:1000"
     networks:

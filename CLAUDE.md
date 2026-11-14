@@ -177,7 +177,7 @@ Each compose file pins a different vLLM image — do not swap these:
 > **mutable** `:nightly` tag, so a `docker pull vllm/vllm-openai:nightly` for one stack silently changed the
 > other's engine on its next restart and reproduced the `gpu_memory_utilization` OOM. Since 2026-10-27 **no compose
 > file uses a floating tag** for an engine, LiteLLM or ClickHouse: the rollback stacks are pinned by digest, the
-> embedding engine by a dated nightly tag, LiteLLM to `v1.106.4` and ClickHouse to `26.8.36.3` (26.8 LTS) in every
+> embedding engine by a dated nightly tag, LiteLLM to `v1.109.1` and ClickHouse to `26.8.37.168` (26.8 LTS) in every
 > file. Langfuse (`:3`), Postgres (`16-alpine`), Redis (`7-alpine`) and MinIO still track a major line. Keep it that
 > way: adopt a new build by editing the pin, never by pulling a floating tag. Never put LiteLLM back on
 > `main-latest` (LiteLLM 1.82.7/1.82.8 on PyPI were a supply-chain compromise in March 2026). The rollback stacks'
@@ -200,6 +200,13 @@ way on 2026-10-27 (`ai-workspace/summary-reports/service-image-updates-2026-10-2
    ~9 min after `up -d` (Flash-Next 107 s weight load, ~6 min to healthy; LiteLLM starts only once it is).
 5. Check: LiteLLM logs `All migrations have been successfully applied.`; `curl localhost:3000/api/public/health`; a chat,
    an Anthropic `/v1/messages` and an embeddings request through port 4000; new rows in ClickHouse `traces`.
+
+**Per-service variant (2026-11-14, Phase 1 of `docs/specs/service-image-updates-2026-11/`).** This avoids the full
+`down`, the cache drop and the sudo step, and keeps the inference engines running. Tag the running images as
+`local/rollback:<ctr>-<date>` first, and back up the Postgres dumps and the agentgateway SQLite DB. Then recreate one
+tier at a time with `./scripts/flash-next-compose.sh up -d --no-deps <svc>`: `postgres redis clickhouse`, then
+`langfuse-worker`, `langfuse-web`, `litellm`, `agentgateway`. None of these is an engine, so the engines keep serving
+and their `StartedAt` stays the same. Never use the bare `up`, `down` or a bare `pull` for this.
 
 ## Model Names and Aliases
 
