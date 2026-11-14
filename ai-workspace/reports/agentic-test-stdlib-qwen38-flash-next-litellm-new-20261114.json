@@ -1,0 +1,72 @@
+{
+  "model": "qwen3.8-flash-next",
+  "base_url": "http://localhost:4000/v1",
+  "timestamp": "2026-11-14T21:09:56",
+  "results": [
+    {
+      "name": "Connectivity",
+      "status": "PASS",
+      "detail": "Got response: '\\n\\npong'",
+      "elapsed_s": 2.46
+    },
+    {
+      "name": "Reasoning presence",
+      "status": "PASS",
+      "detail": "reasoning_tokens=66, correct_answer=True, content_tail='= 17 \u00d7 (20 + 4) = (17 \u00d7 20) + (17 \u00d7 4) = 340 + 68 = 408\\n\\n408'",
+      "elapsed_s": 2.35
+    },
+    {
+      "name": "Small-budget reasoning risk",
+      "status": "PASS",
+      "detail": "content='\\n\\nOK', finish_reason=stop",
+      "elapsed_s": 0.62
+    },
+    {
+      "name": "Single tool call",
+      "status": "PASS",
+      "detail": "read_file({'path': 'src/app.py'})",
+      "elapsed_s": 1.58
+    },
+    {
+      "name": "Tool selection breadth (4/4)",
+      "status": "PASS",
+      "detail": "[OK] Find every place the function `handleSub... -> search_code; [OK] Show me what's in package.json... -> read_file; [OK] Create a new file called utils/helpers.j... -> write_file; [OK] Run the test suite with npm test... -> execute_command",
+      "elapsed_s": 3.8
+    },
+    {
+      "name": "Multi-turn tool context",
+      "status": "PASS",
+      "detail": "Correctly used prior tool result: read_file({'path': 'src/components/TodoList.jsx'})",
+      "elapsed_s": 1.49
+    },
+    {
+      "name": "No hallucinated tool calls",
+      "status": "PASS",
+      "detail": "Plain-text answer: \"\\n\\nAPI stands for **Application Programming Interface**.\\n\\nIt's a set of defined r\"",
+      "elapsed_s": 3.13
+    },
+    {
+      "name": "Streaming reconstruction",
+      "status": "PASS",
+      "detail": "read_file({'path': 'README.md'}) reassembled correctly from stream",
+      "elapsed_s": 0.64
+    },
+    {
+      "name": "Vision",
+      "status": "PASS",
+      "detail": "Identified the 64x64 red PNG: 'Red'",
+      "elapsed_s": 1.19
+    },
+    {
+      "name": "Decode throughput",
+      "status": "PASS",
+      "detail": "completion_tokens=810 (incl. reasoning), finish_reason=stop, elapsed=19.3s, ~42.1 tok/s (includes prefill/TTFT)",
+      "elapsed_s": 19.26
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "warned": 0
+  }
+}

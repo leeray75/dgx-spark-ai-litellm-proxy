@@ -112,6 +112,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Flash-Next engine image `03a95654…` → `19ab778d…`** (2026-11-14, Phase 4). The `:latest` build (created 2026-11-02)
+  replaces the 2026-10-15 pin after the stdlib test suite passed on 3 baseline and 3 new runs and the LiteLLM run.
+  Decode median 40.7 tok/s vs 42.4 tok/s baseline (-4%, inside the 10% rollback bound). Only the engine service was
+  recreated. Previous build kept locally as rollback. Details: `docs/specs/qwen38-flash-next-stack/research.md` R-15.
 - **Flash-Next reasoning effort `xhigh` → `medium`** (2026-10-31, user decision). The checkpoint's chat template
   takes `reasoning_effort` (`xhigh` default, `medium`, `low`; anything else raises). `xhigh` injects "validate key
   assumptions, consider plausible alternatives" into the system prompt, which made agents re-verify requirements they

@@ -51,6 +51,8 @@ Inspected with `docker buildx imagetools inspect`; nothing was pulled.
 | Relevant baked-in env | `TORCH_CUDA_ARCH_LIST=12.1a`, `FLASHINFER_CUDA_ARCH_LIST=12.1a`, `INSTANTTENSOR_IO_DEPTH=16`, `VLLM_BASE_DIR=/workspace/vllm` |
 | `curl` / `python3` present | `curl` and `python3` are apt-installed in the final stage per the image history (layer ~79/104, after an earlier curl purge); not confirmed at runtime (the image isn't pulled). The healthcheck uses `python3` only. |
 
+*Note 2026-11-14 (P4):* the pin moved to `sha256:19ab778dd57f019c44caf5df91a671cf688923d1ca9fa8ce92be0c9acb46d215` (arm64, 9.5 GB, created 2026-11-02, `:latest` on 2026-11-14) after the Phase 4 acceptance passed; see [R-15](#r-15-p4-engine-image-update-to-19ab778d-2026-11-14). The row above is the 2026-10-22 state and is left unchanged. `03a95654…` stays in the local image store as the rollback target.
+
 ## R-4 NVIDIA DGX Spark recipe — environment (verbatim from the card)
 
 ```
@@ -249,3 +251,52 @@ Re-derive after about a day of real use; expect the input price to fall.
 - `scripts/test-agentic-capabilities.py`: tolerates the usage-only stream chunk (`choices: []`); both test scripts default to `qwen3.8-flash-next`. Re-run through agentgateway: Streaming reconstruction PASS (8 PASS, 1 FAIL, 1 WARN; the FAIL was tool-selection breadth 2/4, the sampling variance noted in R-12).
 - Docs: troubleshooting 4e, `agents.md`, `CLAUDE.md`, CHANGELOG now describe the real behaviour for removed aliases; supersession note added next to P1 D-3.
 
+
+## R-15 (P4) Engine image update to 19ab778d (2026-11-14)
+
+**Decision: KEEP.** The Flash-Next engine pin moved from `sha256:03a956544e9f…` (built 2026-10-15) to `sha256:19ab778dd57f019c44caf5df91a671cf688923d1ca9fa8ce92be0c9acb46d215` (built 2026-11-02, arm64, `:latest` on 2026-11-14). No FR-P4-12 trigger was hit. The spec is `phase-4-engine-image-update/spec.md`, and the evidence is in the session scratchpad.
+
+**Image facts**
+- `docker pull` by digest finished at 20:50:00Z, about 40 s after it started (timestamps from session command output; not saved to a file). The local ID is `sha256:19ab778dd57f…`, arch `arm64`, size 9,513,565,303 B (`docker images` shows 27.6 GB). Created 2026-11-02T04:12:35-08:00.
+- Both builds are local (`docker images --digests`). The old 03a95654 image (28.1 GB) stays as the rollback target.
+- The `:latest` tag resolved to `19ab778d…` (`docker buildx imagetools inspect`), so the pin equals `:latest`. After the swap, `scripts/check-engine-image.sh` printed "No new engine image." and `show` agreed.
+- Version string in the boot log: `0.1.dev21830+g8244d1c44.d20261102`. CUDA 13.0.2 (log). The old image's version string was not captured in this phase.
+
+**Baseline on 03a95654 (FR-P4-02), 20:50–20:52Z**, reports `ai-workspace/reports/agentic-test-stdlib-qwen38-flash-next-engine-baseline-20261114-run{1,2,3}.json`
+
+**New on 19ab778d (FR-P4-10), 21:07–21:09Z**, reports `…-engine-new-20261114-run{1,2,3}.json`; **LiteLLM (FR-P4-11)**, report `…-litellm-new-20261114.json`
+
+| Test | base 1 | base 2 | base 3 | new 1 | new 2 | new 3 | LiteLLM new |
+|---|---|---|---|---|---|---|---|
+| Connectivity | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Reasoning presence | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Small-budget reasoning risk (info) | WARN | WARN | WARN | WARN | WARN | PASS | PASS |
+| Single tool call | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Tool selection breadth (info) | 4/4 PASS | 4/4 PASS | 4/4 PASS | 4/4 PASS | 4/4 PASS | 4/4 PASS | 4/4 PASS |
+| Multi-turn tool context | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| No hallucinated tool calls | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Streaming reconstruction | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Vision | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Decode throughput (tok/s) | 42.7 | 42.4 | 40.5 | 40.1 | 40.7 | 41.7 | 42.1 |
+
+- No FAIL in any run. All seven required tests PASS in every run. The Small-budget WARN is the known max_tokens=20 reasoning trait (R-12), so it is informational.
+- `scripts/test-reasoning-effort.py --expect-default medium --skip-behavior`: server default `medium`, PASS (exit 0). The per-request overrides `low`, `medium` and `xhigh` apply, and `enable_thinking=false` turns reasoning off.
+
+**Throughput**
+- Baseline median **42.4 tok/s**; new median **40.7 tok/s**, a change of **-4.0%**. Rollback threshold 0.90 × 42.4 = 38.16 tok/s, not reached.
+- vLLM log `Avg generation throughput` (informational, non-zero 10 s samples over each test window): baseline median 43.1 tok/s (11 samples, max 49.4); new median 42.1 tok/s (11 samples, max 53.6).
+
+**Boot facts (new image)**
+- `up -d --no-deps` at 20:57:36Z; healthy at 21:05:08Z, so **7 m 32 s** (the 30 s poller in `phase4/health.log`).
+- Weights: "Model loading took 70.32 GiB memory and 194.06 s" (R-12: 70.32 GiB, 238.9 s). The b12x loader reported 90.60 s for 71.74 GB of routed weights, plus 1.46 s for a second stage.
+- `init engine (profile, create kv cache, warmup model)` took 204.16 s (R-12: 749 s on the first compile).
+- KV cache at `--gpu-memory-utilization 0.75`: **18.44 GiB = 981,083 tokens; Maximum concurrency for 262,144 tokens per request: 3.74x**. The 2026-10-22 boot at 0.75 (CLAUDE.md, the same flags and build age) logged 16.7 GiB / 888,648 tokens / 3.39x.
+- Caches: the b12x log showed 207 entries reused and 126 compiled (`gemm.blockscaled_precision`, `moe.decode`, `quantization.csf_block_expansion` and others). So the b12x caches were partly reused and partly rebuilt for the new build. The vLLM compile cache was not inspected.
+- No Traceback, Error or OOM line in the boot log (`docker logs`). `OOMKilled=false` for every container.
+- Host memory once healthy and idle (`phase4/meminfo_healthy_idle.txt`): MemFree 16.15 GiB, **MemAvailable 18.35 GiB**, Cached 2.94 GiB, SwapFree 5.07 GiB. During the tests, MemAvailable read 17.6–17.9 GiB (four spot checks; values from session command output, not saved to a file).
+- `/v1/models`: the engine (:8301) and LiteLLM (:4000) both list `qwen3.8-flash-next`.
+- Other services: the `StartedAt` of the other 14 containers did not change (`startedat_before.txt` vs `startedat_after.txt`). `docker volume ls -q` matches the baseline (23 volumes).
+
+**Memory checkpoint (FR-P4-06).** After `stop`, MemFree was **5.59 GiB** (MemAvailable 111.65 GiB, Cached 7.54 GiB; `meminfo_after_stop.txt`), below the 95 GiB gate. The pull had filled the page cache (0.84 GiB MemFree before the stop). The user ran the sudo cache drop. The re-read gave MemFree **111.29 GiB** (MemAvailable 111.76 GiB, Cached 1.17 GiB; `meminfo_after_drop.txt`), and the engine resumed. The engine was down for about 10.5 minutes in total (20:54:35Z stop → 21:05:08Z healthy), including the wait for the cache drop.
+
+**Rollback.** Not performed. The compose file keeps the new pin, and `03a95654…` remains local for an instant rollback (FR-P4-13).

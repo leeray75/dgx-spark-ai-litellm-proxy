@@ -1,0 +1,72 @@
+{
+  "model": "qwen3.8-flash-next",
+  "base_url": "http://localhost:8301/v1",
+  "timestamp": "2026-11-14T20:50:51",
+  "results": [
+    {
+      "name": "Connectivity",
+      "status": "PASS",
+      "detail": "Got response: '\\n\\npong'",
+      "elapsed_s": 1.22
+    },
+    {
+      "name": "Reasoning presence",
+      "status": "PASS",
+      "detail": "reasoning_tokens=126, correct_answer=True, content_tail='= 17 \u00d7 (20 + 4) = (17 \u00d7 20) + (17 \u00d7 4) = 340 + 68 = 408\\n\\n408'",
+      "elapsed_s": 3.35
+    },
+    {
+      "name": "Small-budget reasoning risk",
+      "status": "WARN",
+      "detail": "Known behavior reproduced: max_tokens=20 returned empty content (all tokens spent on reasoning). Not a new bug \u2014 a known trait of reasoning models (see the SIMPLIFICATION PASS note in docker-compose.qwen3.8.yml). Flag this to harness authors if they use small per-call token budgets.",
+      "elapsed_s": 0.78
+    },
+    {
+      "name": "Single tool call",
+      "status": "PASS",
+      "detail": "read_file({'path': 'src/app.py'})",
+      "elapsed_s": 1.25
+    },
+    {
+      "name": "Tool selection breadth (4/4)",
+      "status": "PASS",
+      "detail": "[OK] Find every place the function `handleSub... -> search_code; [OK] Show me what's in package.json... -> read_file; [OK] Create a new file called utils/helpers.j... -> write_file; [OK] Run the test suite with npm test... -> execute_command",
+      "elapsed_s": 5.07
+    },
+    {
+      "name": "Multi-turn tool context",
+      "status": "PASS",
+      "detail": "Correctly used prior tool result: read_file({'path': 'src/components/TodoList.jsx'})",
+      "elapsed_s": 3.34
+    },
+    {
+      "name": "No hallucinated tool calls",
+      "status": "PASS",
+      "detail": "Plain-text answer: \"\\n\\nAPI stands for **Application Programming Interface**.\\n\\nIt's a set of defined r\"",
+      "elapsed_s": 2.65
+    },
+    {
+      "name": "Streaming reconstruction",
+      "status": "PASS",
+      "detail": "read_file({'path': 'README.md'}) reassembled correctly from stream",
+      "elapsed_s": 1.22
+    },
+    {
+      "name": "Vision",
+      "status": "PASS",
+      "detail": "Identified the 64x64 red PNG: 'Red'",
+      "elapsed_s": 1.57
+    },
+    {
+      "name": "Decode throughput",
+      "status": "PASS",
+      "detail": "completion_tokens=841 (incl. reasoning), finish_reason=stop, elapsed=19.7s, ~42.7 tok/s (includes prefill/TTFT)",
+      "elapsed_s": 19.7
+    }
+  ],
+  "summary": {
+    "passed": 9,
+    "failed": 0,
+    "warned": 1
+  }
+}
